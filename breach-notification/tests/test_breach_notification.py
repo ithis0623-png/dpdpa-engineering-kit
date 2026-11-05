@@ -3,6 +3,11 @@ from pathlib import Path
 
 import pytest
 from breach_classifier import ClassificationResult, classify
+from notification_formatter import (
+    BreachIntimationBuilder,
+    DataCategory,
+    FiduciaryContact,
+)
 
 HERE = Path(__file__).resolve().parent.parent
 
@@ -72,3 +77,98 @@ def test_savedsearch_is_valid_conf_and_matches_the_classifier():
         if action != "AccessDenied_Anomalous":  # availability signal; deliberately left for DPO triage
             result = classify({"contains_personal_data": True, "action": action})
             assert result is ClassificationResult.CONFIRMED_BREACH, action
+
+
+@pytest.fixture
+def contact():
+    return FiduciaryContact(
+        name="Ananya Roy",
+        email="privacy-contact@example.in",
+        phone="+91-11-23456789",
+        role_or_title="Designated Grievance & Privacy Officer",
+    )
+
+
+def test_principal_intimation_rule_7_1(contact):
+    builder = BreachIntimationBuilder(contact)
+    notice = builder.build_principal_intimation(
+        principal_id="dp-9988",
+        nature="Unauthorised access to user database replica",
+        timing="2026-11-01 14:30 UTC",
+        location="ap-south-1 replica database",
+        consequences_for_principal="Your contact number may receive targeted phishing SMS or calls.",
+        compromised_categories=[DataCategory.CONTACT],
+        mitigation_measures=["The compromised read-replica was quarantined within 20 minutes."],
+        recommended_safety_steps=["Be alert to suspicious phone calls or SMS messages asking for OTPs."],
+        language_code="en",
+    )
+
+    d = notice.to_dict()
+    assert d["principal_id"] == "dp-9988"
+    assert d["timing"] == "2026-11-01 14:30 UTC"
+    assert d["location"] == "ap-south-1 replica database"
+    assert "phishing" in d["consequences_for_principal"]
+    assert d["compromised_categories"] == ["contact"]
+    assert d["contact"]["name"] == "Ananya Roy"
+
+
+def test_principal_intimation_validation_errors(contact):
+    builder = BreachIntimationBuilder(contact)
+    with pytest.raises(ValueError, match="Timing and location"):
+        builder.build_principal_intimation(
+            principal_id="dp-1",
+            nature="leak",
+            timing="",
+            location="",
+            consequences_for_principal="test",
+            compromised_categories=[DataCategory.CONTACT],
+            mitigation_measures=["patched"],
+            recommended_safety_steps=["change password"],
+        )
+
+
+def test_board_first_intimation_rule_7_2_a(contact):
+    builder = BreachIntimationBuilder(contact)
+    first_notice = builder.build_board_first_intimation(
+        incident_id="INC-2026-101",
+        nature="Unauthorised database exfiltration via compromised API token",
+        extent_affected_principals=1200,
+        location="Core Accounts Cluster, ap-south-1",
+        likely_impact="Risk of identity theft and credential reuse for 1200 principals",
+        immediate_mitigation=["Revoked compromised API token", "Rotated database credentials"],
+    )
+
+    data = first_notice.to_dict()
+    assert data["incident_id"] == "INC-2026-101"
+    assert data["extent_affected_principals"] == 1200
+    assert "detected_at" in data["timing"]
+    assert len(data["immediate_mitigation"]) == 2
+
+
+def test_board_detailed_report_rule_7_2_b(contact):
+    builder = BreachIntimationBuilder(contact)
+    report = builder.build_board_detailed_report(
+        incident_id="INC-2026-101",
+        first_intimation_id="INT-FIRST-001",
+        root_cause_and_timeline=(
+            "Root cause was an exposed staging credential. Access began at 10:00, detected at 10:45."
+        ),
+        affected_categories=[DataCategory.IDENTITY, DataCategory.FINANCIAL],
+        affected_volume_records=2500,
+        consequences_assessment="Assessed as moderate-high risk; no core banking data touched.",
+        remedial_measures_taken=["Staging environment isolated", "All secrets rotated in AWS Secrets Manager"],
+        remedial_measures_planned=["Mandatory hardware MFA rollout across all engineering accounts"],
+        principal_intimations_report={
+            "count_sent": 1200,
+            "channels_used": ["email", "sms"],
+            "date_commenced": "2026-11-02T12:00:00Z",
+            "summary": "1,192 delivered, 8 bounced",
+        },
+        follow_up_actions=["Scheduled external penetration testing with CERT-In empaneled auditor"],
+    )
+
+    d = report.to_dict()
+    assert d["report_id"]
+    assert d["affected_volume_records"] == 2500
+    assert d["principal_intimations_report"]["count_sent"] == 1200
+    assert len(d["remedial_measures_taken"]) == 2
