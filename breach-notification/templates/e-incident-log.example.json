@@ -1,0 +1,21 @@
+{
+  "incident_id": "INC-2027-014",
+  "noticed_at": "2027-06-03T13:05:00+05:30",
+  "aware_at": "2027-06-03T14:10:00+05:30",
+  "incident_lead": "Priya (CTO)",
+  "deputy": "Arjun (lead engineer)",
+  "decisions": [
+    {"number": 1, "answer": "In scope: customer records in the billing database are digital personal data (S.3(a))", "decided_at": "2027-06-03T14:15:00+05:30", "decided_by": "Priya"},
+    {"number": 2, "answer": "Personal data breach: customer emails acquired without authorisation (S.2(u))", "decided_at": "2027-06-03T14:15:00+05:30", "decided_by": "Priya"},
+    {"number": 3, "answer": "Our data: we are the Data Fiduciary (S.2(i))", "decided_at": "2027-06-03T14:16:00+05:30", "decided_by": "Priya"},
+    {"number": 4, "answer": "Processor involved: billing integration vendor; still ours to intimate (S.8(1))", "decided_at": "2027-06-03T14:18:00+05:30", "decided_by": "Priya"},
+    {"number": 5, "answer": "CERT-In: yes, a data breach is an Annexure I incident; report within 6 hours of N", "decided_at": "2027-06-03T14:20:00+05:30", "decided_by": "Priya"}
+  ],
+  "entries": [
+    {"at": "2027-06-03T14:20:00+05:30", "who": "Arjun, lead engineer", "what": "Revoked the API key for the billing integration", "evidence": "Log export saved to incident-store/INC-2027-014/, sha256:9f2c…", "next_action": "Scope affected records, Arjun, by 16:00"},
+    {"at": "2027-06-03T17:40:00+05:30", "who": "Priya, CTO", "what": "Reported to CERT-In", "message": {"to": "cert_in", "channel": "incident@cert-in.org.in", "reference": "CERTIN-ACK-5512"}},
+    {"at": "2027-06-03T18:30:00+05:30", "who": "Meera, director", "what": "First intimation to the Board sent (template b)", "message": {"to": "board", "channel": "[the Board's published channel]", "reference": "DPB-REF-0091"}},
+    {"at": "2027-06-03T19:00:00+05:30", "who": "Support operations", "what": "Intimation to affected customers sent (template a)", "message": {"to": "data_principals", "channel": "registered email", "recipients": 1840, "failed": 23}, "next_action": "Resend the 23 failures by SMS, support, by 21:00"},
+    {"at": "2027-06-03T21:05:00+05:30", "who": "Support operations", "what": "Resent failed intimations", "message": {"to": "data_principals", "channel": "registered mobile number", "recipients": 23}}
+  ]
+}
