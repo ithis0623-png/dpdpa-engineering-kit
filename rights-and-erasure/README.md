@@ -12,6 +12,13 @@ From [NIST Privacy Framework and DPDPA](https://statechecksecurity.com/blog/nist
 | `rights_service.py` | Access summary (data, purposes, the processors and fiduciaries it was shared with) and erasure across every system in the inventory, skipping systems under a legal hold and saying so |
 | `erasure_triggers.py` | Decides whether erasure is due: consent withdrawn, Data Principal request, purpose completed, or inactivity past a prescribed period |
 
+### Correction & Nomination Services (Statutory Extension)
+
+| Feature | Statutory Basis | Description |
+|---|---|---|
+| Correction & Updating | Section 12(1)–(2) | Updates personal data across all affected systems (including held systems, as retention obligations do not justify retaining inaccurate data) and notifies downstream entities |
+| Nomination | Section 14, Rule 14 | Registers and retrieves nomination for death or incapacity, recording privacy-preserving reference tokens in audit logs |
+
 ## Before you use it
 
 - **Inventory.** Implement `DataInventory` against your data catalogue or CMDB.

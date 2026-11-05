@@ -1,4 +1,4 @@
-# Data Principal Rights service (implements CT.DM-P1 through P4 + Sections 11, 12)
+# Data Principal Rights service (implements CT.DM-P1 through P4 + Sections 11, 12, 14)
 #
 # The two public methods are the ones from the NIST Privacy Framework article.
 # The private methods the article left out are implemented against the
@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from hashlib import sha256
 from typing import Protocol
 
 
@@ -34,10 +35,45 @@ class DataInventory(Protocol):
     def shared_with(self, principal_id: str) -> list[dict]: ...
     def legal_holds(self, principal_id: str) -> set[str]: ...
     def erase(self, system_id: str, principal_id: str) -> dict: ...
+    def update(self, system_id: str, principal_id: str, changes: dict) -> dict: ...
+    def record_nomination(self, principal_id: str, nominee: dict) -> dict: ...
+    def get_nomination(self, principal_id: str) -> dict | None: ...
 
 
 class AuditSink(Protocol):
     def write(self, event: dict) -> None: ...
+
+
+class DownstreamNotifier(Protocol):
+    def notify_correction(
+        self,
+        principal_id: str,
+        changes: dict,
+        downstream_entities: list[dict],
+    ) -> list[str]: ...
+
+
+@dataclass
+class InMemoryDownstreamNotifier:
+    """Reference implementation for notifying downstream processors/fiduciaries."""
+    notifications: list[dict] = field(default_factory=list)
+
+    def notify_correction(
+        self,
+        principal_id: str,
+        changes: dict,
+        downstream_entities: list[dict],
+    ) -> list[str]:
+        notified = []
+        for entity in downstream_entities:
+            entity_name = entity.get("name", "unknown")
+            self.notifications.append({
+                "principal_id": principal_id,
+                "entity": entity_name,
+                "changes": changes,
+            })
+            notified.append(entity_name)
+        return notified
 
 
 @dataclass
@@ -47,6 +83,7 @@ class InMemoryInventory:
     systems: dict = field(default_factory=dict)        # system_id -> {"system_name", "purposes", "data": {pid: [...]}}
     sharing: dict = field(default_factory=dict)        # pid -> [{"name", "role"}]
     holds: dict = field(default_factory=dict)          # pid -> {system_id, ...}
+    nominations: dict = field(default_factory=dict)    # pid -> nominee dict
 
     def systems_for(self, principal_id):
         return [{"system_id": sid, **{k: v for k, v in s.items() if k != "data"}}
@@ -65,6 +102,28 @@ class InMemoryInventory:
         removed = self.systems[system_id]["data"].pop(principal_id, [])
         return {"system_id": system_id, "elements_erased": len(removed)}
 
+    def update(self, system_id, principal_id, changes):
+        if system_id not in self.systems or principal_id not in self.systems[system_id]["data"]:
+            return {"system_id": system_id, "fields_updated": 0}
+        elements = self.systems[system_id]["data"][principal_id]
+        updated = 0
+        for el in elements:
+            for k, v in changes.items():
+                if el.get("field") == k:
+                    el["value"] = v
+                    updated += 1
+                elif k in el:
+                    el[k] = v
+                    updated += 1
+        return {"system_id": system_id, "fields_updated": updated}
+
+    def record_nomination(self, principal_id, nominee):
+        self.nominations[principal_id] = nominee
+        return nominee
+
+    def get_nomination(self, principal_id):
+        return self.nominations.get(principal_id)
+
 
 class DPDPARightsService:
     """
@@ -72,9 +131,15 @@ class DPDPARightsService:
     Each method traces to both the NIST subcategory and the DPDPA section it satisfies.
     """
 
-    def __init__(self, inventory: DataInventory, audit: AuditSink):
+    def __init__(
+        self,
+        inventory: DataInventory,
+        audit: AuditSink,
+        notifier: DownstreamNotifier | None = None,
+    ):
         self.inventory = inventory
         self.audit = audit
+        self.notifier = notifier or InMemoryDownstreamNotifier()
 
     def handle_access_request(
         self, principal_id: str
@@ -115,7 +180,7 @@ class DPDPARightsService:
         # Identify all systems holding this principal's data (ID.IM-P1)
         affected_systems = self._get_systems_for_principal(principal_id)
 
-        # Check legal retention holds before erasure
+        # Check legal retention holds before erasure (Section 8(7) retention obligation)
         retention_holds = self._check_retention_holds(principal_id)
 
         erasure_results = []
@@ -137,6 +202,105 @@ class DPDPARightsService:
             "retention_holds": len(held),
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def handle_correction_request(
+        self,
+        principal_id: str,
+        corrections: dict[str, dict],
+        reason: str = "correction",
+    ) -> dict:
+        """
+        NIST: CT.DM-P3 (data accessible for correction)
+        DPDPA: Section 12(1)-(2) -- correction, completion, and updating of personal data
+
+        Statutory Scope:
+          - Section 8(7) legal retention holds prevent *erasure*, not correction. A retention
+            obligation is no justification for maintaining inaccurate or misleading records.
+            Therefore, held systems are updated rather than skipped.
+          - Section 12(1) requires the Data Fiduciary to notify all downstream entities
+            (processors and other fiduciaries) of the corrected data.
+        """
+        request_id = str(uuid.uuid4())
+        affected_systems = self._get_systems_for_principal(principal_id)
+
+        update_results = []
+        for system in affected_systems:
+            sid = system["system_id"]
+            if sid in corrections:
+                result = self.inventory.update(sid, principal_id, corrections[sid])
+                update_results.append(result)
+
+        # Notify downstream entities per Section 12(1)
+        downstream = self._get_downstream_entities(principal_id)
+        notified_entities = self.notifier.notify_correction(principal_id, corrections, downstream)
+
+        self._log_correction_audit(request_id, principal_id, update_results, reason)
+
+        return {
+            "request_id": request_id,
+            "right_type": RightType.CORRECTION.value,
+            "status": RequestStatus.COMPLETED.value,
+            "systems_updated": len(update_results),
+            "downstream_entities_notified": len(notified_entities),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def handle_nomination_request(
+        self,
+        principal_id: str,
+        nominee: dict,
+    ) -> dict:
+        """
+        DPDPA: Section 14 -- Right of nomination in the event of death or incapacity
+        DPDP Rules, 2025: Rule 14 -- Readily available means of exercising rights
+
+        Note: Personal data of the nominee is never written into the audit log;
+        only a pseudonymous reference token is recorded.
+        """
+        request_id = str(uuid.uuid4())
+        if not isinstance(nominee, dict) or not nominee.get("name"):
+            return {
+                "request_id": request_id,
+                "right_type": RightType.NOMINATION.value,
+                "status": RequestStatus.REJECTED.value,
+                "reason": "invalid_nominee_details",
+            }
+
+        recorded = self.inventory.record_nomination(principal_id, nominee)
+        nominee_ref = f"nom-{sha256(nominee['name'].encode('utf-8')).hexdigest()[:12]}"
+
+        self.audit.write({
+            "event": "nomination_registered",
+            "request_id": request_id,
+            "principal_id": principal_id,
+            "nominee_ref": nominee_ref,
+            "relationship": nominee.get("relationship"),
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        return {
+            "request_id": request_id,
+            "right_type": RightType.NOMINATION.value,
+            "status": RequestStatus.COMPLETED.value,
+            "nominee_ref": nominee_ref,
+            "nominee": recorded,
+            "registered_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def get_nomination(self, principal_id: str) -> dict | None:
+        """Retrieves active nomination record under Section 14."""
+        return self.inventory.get_nomination(principal_id)
+
+    def _log_correction_audit(self, req_id: str, pid: str, results: list, reason: str) -> None:
+        # Audit record names systems and count, never the personal data values
+        self.audit.write({
+            "event": "correction_executed",
+            "request_id": req_id,
+            "principal_id": pid,
+            "reason": reason,
+            "systems": [r["system_id"] for r in results],
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
 
     def _compile_data_summary(self, principal_id: str) -> list[dict]:
         return [

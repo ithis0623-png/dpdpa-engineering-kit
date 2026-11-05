@@ -107,3 +107,73 @@ def test_erasure_without_holds_is_completed(rights):
     service, inventory, _ = rights
     inventory.holds.clear()
     assert service.handle_erasure_request("dp-1", "consent_withdrawal")["status"] == "completed"
+
+
+def test_correction_updates_held_systems_and_notifies_downstream(rights):
+    """Section 12(1)-(2): Legal holds stop erasure, not correction.
+
+    A retention obligation is no reason to keep inaccurate data. Held systems
+    must still be updated, and downstream processors notified.
+    """
+    service, inventory, audit = rights
+    corrections = {
+        "crm": {"email": "asha.new@example.in"},
+        "billing": {"gstin": "29ABCDE9999F1Z9"},
+    }
+
+    # "billing" is held under legal retention in fixture
+    assert "billing" in inventory.legal_holds("dp-1")
+
+    resp = service.handle_correction_request("dp-1", corrections)
+    assert resp["status"] == "completed"
+    assert resp["systems_updated"] == 2
+    assert resp["downstream_entities_notified"] == 1
+
+    # Verify held system (billing) was indeed updated
+    billing_data = inventory.systems["billing"]["data"]["dp-1"][0]
+    assert billing_data["value"] == "29ABCDE9999F1Z9"
+
+    # Verify CRM was updated
+    crm_data = inventory.systems["crm"]["data"]["dp-1"][0]
+    assert crm_data["value"] == "asha.new@example.in"
+
+    # Downstream notification recorded
+    assert len(service.notifier.notifications) == 1
+    assert service.notifier.notifications[0]["entity"] == "ShipRocket"
+
+    # PII kept out of audit log
+    assert "asha.new@example.in" not in repr(audit.events)
+    assert "29ABCDE9999F1Z9" not in repr(audit.events)
+
+
+def test_nomination_registration_and_retrieval(rights):
+    """Section 14 & Rule 14: Nomination in event of death/incapacity."""
+    service, _, audit = rights
+    nominee = {
+        "name": "Priya Sharma",
+        "relationship": "spouse",
+        "contact": "priya@example.in",
+    }
+
+    resp = service.handle_nomination_request("dp-1", nominee)
+    assert resp["status"] == "completed"
+    assert resp["nominee_ref"].startswith("nom-")
+
+    retrieved = service.get_nomination("dp-1")
+    assert retrieved["name"] == "Priya Sharma"
+    assert retrieved["relationship"] == "spouse"
+
+    # Audit log keeps personal data out of logs
+    assert "Priya Sharma" not in repr(audit.events)
+    assert "priya@example.in" not in repr(audit.events)
+    nom_event = [e for e in audit.events if e.get("event") == "nomination_registered"][0]
+    assert nom_event["nominee_ref"] == resp["nominee_ref"]
+    assert nom_event["relationship"] == "spouse"
+
+
+def test_nomination_rejected_without_name(rights):
+    service, _, _ = rights
+    resp = service.handle_nomination_request("dp-1", {"relationship": "child"})
+    assert resp["status"] == "rejected"
+    assert resp["reason"] == "invalid_nominee_details"
+
