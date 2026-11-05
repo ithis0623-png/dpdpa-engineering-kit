@@ -13,6 +13,7 @@ from grant_endpoint import (
     NoticeVersion,
     Settings,
     create_app,
+    get_settings,
 )
 
 KEY = Ed25519PrivateKey.generate()
@@ -142,3 +143,79 @@ class TestGrantEndpoint:
             client.post("/v1/consents", json=body)
         assert store.consent_records == {}
         assert store.audit_events == []
+
+
+class TestWithdrawEndpoint:
+    def test_withdraw_consent_by_id_updates_status_and_chains_audit(self, api):
+        client, store, _, body = api
+        grant_resp = client.post("/v1/consents", json=body)
+        assert grant_resp.status_code == 201
+        consent_id = grant_resp.json()["consent_id"]
+
+        withdraw_resp = client.post(f"/v1/consents/{consent_id}/withdraw")
+        assert withdraw_resp.status_code == 200
+        data = withdraw_resp.json()
+        assert data["consent_id"] == consent_id
+        assert data["status"] == "withdrawn"
+        assert "withdrawn_at" in data
+
+        record = store.consent_records[uuid.UUID(consent_id)]
+        assert record["status"] == "withdrawn"
+        assert datetime.fromisoformat(data["withdrawn_at"]) == record["withdrawn_at"]
+
+        # Audit chain must now include NOTICE_SHOWN, GRANT, and WITHDRAW
+        assert [e["event_type"] for e in store.audit_events] == ["NOTICE_SHOWN", "GRANT", "WITHDRAW"]
+        assert verify_chain(store.audit_events) is None
+
+    def test_withdraw_triggers_processor_fanout_and_erasure_event(self, api):
+        client, store, _, body = api
+        grant_resp = client.post("/v1/consents", json=body)
+        consent_id = grant_resp.json()["consent_id"]
+
+        # Configure downstream processors
+        client.app.dependency_overrides[get_settings] = lambda: Settings(
+            signing_key=KEY,
+            pseudonym_key=b"test-pseudonym-key",
+            processors=["analytics-processor-01", "payment-processor-02"],
+        )
+
+        withdraw_resp = client.post(f"/v1/consents/{consent_id}/withdraw")
+        assert withdraw_resp.status_code == 200
+        assert withdraw_resp.json()["processors_notified"] == [
+            "analytics-processor-01",
+            "payment-processor-02",
+        ]
+        assert len(store.processor_fanouts) == 2
+        events = [e["event_type"] for e in store.audit_events]
+        assert events == ["NOTICE_SHOWN", "GRANT", "WITHDRAW", "ERASURE_FANOUT", "ERASURE_FANOUT"]
+        assert verify_chain(store.audit_events) is None
+
+    def test_withdraw_parity_endpoint(self, api):
+        client, store, notice, body = api
+        grant_resp = client.post("/v1/consents", json=body)
+        consent_id = grant_resp.json()["consent_id"]
+
+        withdraw_body = {
+            "principal_id": body["principal_id"],
+            "purpose_id": str(notice.purpose_id),
+        }
+        withdraw_resp = client.post("/v1/consents/withdraw", json=withdraw_body)
+        assert withdraw_resp.status_code == 200
+        assert withdraw_resp.json()["consent_id"] == consent_id
+        assert withdraw_resp.json()["status"] == "withdrawn"
+
+    def test_withdraw_already_withdrawn_returns_409(self, api):
+        client, _, _, body = api
+        grant_resp = client.post("/v1/consents", json=body)
+        consent_id = grant_resp.json()["consent_id"]
+
+        assert client.post(f"/v1/consents/{consent_id}/withdraw").status_code == 200
+        second = client.post(f"/v1/consents/{consent_id}/withdraw")
+        assert second.status_code == 409
+        assert second.json()["detail"] == "consent_already_withdrawn"
+
+    def test_withdraw_nonexistent_returns_404(self, api):
+        client, _, _, _ = api
+        random_id = str(uuid.uuid4())
+        resp = client.post(f"/v1/consents/{random_id}/withdraw")
+        assert resp.status_code == 404

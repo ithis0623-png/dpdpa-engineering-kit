@@ -18,7 +18,7 @@ from audit_chain import GENESIS_HASH, compute_event_hash
 from consent_receipt import build_consent_receipt
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConsentGrantRequest(BaseModel):
@@ -33,6 +33,18 @@ class ConsentGrantRequest(BaseModel):
 class ConsentGrantResponse(BaseModel):
     consent_id: uuid.UUID
     receipt: dict
+
+
+class ConsentWithdrawRequest(BaseModel):
+    principal_id: uuid.UUID
+    purpose_id: uuid.UUID
+
+
+class ConsentWithdrawResponse(BaseModel):
+    consent_id: uuid.UUID
+    status: str
+    withdrawn_at: datetime
+    processors_notified: list[str] = Field(default_factory=list)
 
 
 @dataclass
@@ -57,6 +69,10 @@ class ConsentStore(Protocol):
     def transaction(self): ...
     async def insert_consent_record(self, **fields) -> uuid.UUID: ...
     async def append_audit_event(self, consent_id: uuid.UUID, event_type: str, payload: dict) -> None: ...
+    async def fetch_consent_record(self, consent_id: uuid.UUID) -> dict | None: ...
+    async def fetch_active_consent(self, principal_id: uuid.UUID, purpose_id: uuid.UUID) -> dict | None: ...
+    async def withdraw_consent_record(self, consent_id: uuid.UUID, withdrawn_at: datetime) -> None: ...
+    async def record_processor_fanout(self, consent_id: uuid.UUID, processor_id: str) -> None: ...
 
 
 @dataclass
@@ -67,6 +83,7 @@ class InMemoryConsentStore:
     translations: dict = field(default_factory=dict)
     consent_records: dict = field(default_factory=dict)
     audit_events: list = field(default_factory=list)
+    processor_fanouts: list = field(default_factory=list)
     fail_on_event: str | None = None  # test hook: raise when this event type is appended
 
     async def fetch_notice_version(self, notice_version_id):
@@ -75,13 +92,45 @@ class InMemoryConsentStore:
     async def fetch_notice_translation(self, notice_version_id, language_code):
         return self.translations.get((notice_version_id, language_code))
 
+    async def fetch_consent_record(self, consent_id: uuid.UUID) -> dict | None:
+        rec = self.consent_records.get(consent_id)
+        if rec:
+            return {"consent_id": consent_id, **rec}
+        return None
+
+    async def fetch_active_consent(self, principal_id: uuid.UUID, purpose_id: uuid.UUID) -> dict | None:
+        for cid, rec in self.consent_records.items():
+            if (
+                rec.get("principal_id") == principal_id
+                and rec.get("purpose_id") == purpose_id
+                and rec.get("status") == "granted"
+            ):
+                return {"consent_id": cid, **rec}
+        return None
+
+    async def withdraw_consent_record(self, consent_id: uuid.UUID, withdrawn_at: datetime) -> None:
+        if consent_id in self.consent_records:
+            self.consent_records[consent_id]["status"] = "withdrawn"
+            self.consent_records[consent_id]["withdrawn_at"] = withdrawn_at
+
+    async def record_processor_fanout(self, consent_id: uuid.UUID, processor_id: str) -> None:
+        self.processor_fanouts.append({
+            "consent_id": consent_id,
+            "processor_id": processor_id,
+            "status": "pending",
+        })
+
     @asynccontextmanager
     async def transaction(self):
-        records, events = dict(self.consent_records), list(self.audit_events)
+        records = dict(self.consent_records)
+        events = list(self.audit_events)
+        fanouts = list(self.processor_fanouts)
         try:
             yield
         except Exception:
-            self.consent_records, self.audit_events = records, events
+            self.consent_records = records
+            self.audit_events = events
+            self.processor_fanouts = fanouts
             raise
 
     async def insert_consent_record(self, **fields):
@@ -111,6 +160,7 @@ class InMemoryConsentStore:
 class Settings:
     signing_key: Ed25519PrivateKey
     pseudonym_key: bytes  # HMAC key; keep it in a KMS or vault, never next to the data
+    processors: list[str] = field(default_factory=list)
 
 
 def hmac_sha256(value: str, key: bytes) -> bytes:
@@ -182,6 +232,62 @@ async def grant_consent(
                                     {"receipt": receipt})
 
     return ConsentGrantResponse(consent_id=consent_id, receipt=receipt)
+
+
+@router.post("/v1/consents/{consent_id}/withdraw", status_code=200)
+async def withdraw_consent(
+    consent_id: uuid.UUID,
+    db: ConsentStore = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+) -> ConsentWithdrawResponse:
+    withdrawn_at = datetime.now(timezone.utc)
+    processors = getattr(settings, "processors", [])
+
+    # The status check and withdrawal mutation are executed inside a single
+    # transaction (SELECT ... FOR UPDATE in PostgreSQL) to prevent concurrent
+    # requests from writing duplicate WITHDRAW audit events.
+    async with db.transaction():
+        record = await db.fetch_consent_record(consent_id)
+        if record is None:
+            raise HTTPException(404, "consent_not_found")
+        if record.get("status") == "withdrawn":
+            raise HTTPException(409, "consent_already_withdrawn")
+
+        await db.withdraw_consent_record(consent_id, withdrawn_at)
+        await db.append_audit_event(
+            consent_id,
+            "WITHDRAW",
+            {"withdrawn_at": withdrawn_at.isoformat(), "reason": "principal_withdrawal"},
+        )
+        for proc in processors:
+            await db.record_processor_fanout(consent_id, proc)
+            await db.append_audit_event(
+                consent_id,
+                "ERASURE_FANOUT",
+                {"processor_id": proc, "triggered_by": "WITHDRAW"},
+            )
+
+    return ConsentWithdrawResponse(
+        consent_id=consent_id,
+        status="withdrawn",
+        withdrawn_at=withdrawn_at,
+        processors_notified=processors,
+    )
+
+
+@router.post("/v1/consents/withdraw", status_code=200)
+async def withdraw_consent_parity(
+    body: ConsentWithdrawRequest,
+    db: ConsentStore = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+) -> ConsentWithdrawResponse:
+    """Withdrawal parity endpoint implementing DPDPA Section 6(4).
+    Withdraws active consent for a given principal and purpose with the same
+    simplicity as granting consent."""
+    record = await db.fetch_active_consent(body.principal_id, body.purpose_id)
+    if record is None:
+        raise HTTPException(404, "active_consent_not_found")
+    return await withdraw_consent(record["consent_id"], db=db, settings=settings)
 
 
 def create_app(store: ConsentStore, settings: Settings) -> FastAPI:

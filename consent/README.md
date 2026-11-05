@@ -11,7 +11,7 @@ and [SOC 2 and DPDPA](https://statechecksecurity.com/blog/soc-2-dpdpa-compliance
 | `schema.sql` | PostgreSQL schema: purposes, versioned notices with one translation per language, consent records bound to the notice version shown, a monthly-partitioned audit log, processor fan-out for erasure |
 | `consent_receipt.py` | Builds and verifies an Ed25519-signed consent receipt |
 | `audit_chain.py` | Hash-chain entry for each consent event, and `verify_chain()` to find the first edited or missing row |
-| `grant_endpoint.py` | FastAPI `POST /v1/consents`: checks the notice is current and the content hash matches what the client rendered, signs a receipt, writes the record and two audit events in one transaction |
+| `grant_endpoint.py` | FastAPI `POST /v1/consents` (grant) and withdrawal parity endpoints `POST /v1/consents/{id}/withdraw` / `POST /v1/consents/withdraw`: atomic status checks, hash-chained audit logging, and cascading processor fan-out |
 | `soc2-consent-audit-log.sql` | A simpler append-only consent log (SOC 2 P2.1 extension) enforced with role grants |
 | `erd.mmd`, `lifecycle.mmd` | Entity and sequence diagrams |
 
