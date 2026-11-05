@@ -3,16 +3,16 @@
 The step scripts are read from the workflow file, so the tests cover exactly
 what CI would run. Needs bash and GNU grep (Git Bash on Windows works).
 """
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+from conftest import find_bash
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = yaml.safe_load((ROOT / "github" / "dpdpa-privacy-checks.yml").read_text(encoding="utf-8"))
-BASH = shutil.which("bash")
+BASH = find_bash()
 
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash is not installed")
 

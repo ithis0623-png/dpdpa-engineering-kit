@@ -1,16 +1,16 @@
 """Checks the GitLab pipeline. GitLab's own linter needs a GitLab instance, so this covers
 structure and runs the PII grep step the same way test_workflow_gates.py does."""
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+from conftest import find_bash
 
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINE = yaml.safe_load((ROOT / "gitlab" / "gitlab-ci.yml").read_text(encoding="utf-8"))
 JOB = PIPELINE["dpdpa-sast-scan"]
-BASH = shutil.which("bash")
+BASH = find_bash()
 
 
 def test_job_uses_a_declared_stage():
