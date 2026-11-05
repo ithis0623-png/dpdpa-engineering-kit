@@ -89,3 +89,63 @@ def test_both_operations_are_audited_without_the_plaintext(enc):
     assert audit.events[1]["requester"] == "support-agent-7"
     assert "asha@example.in" not in repr(audit.events)
     assert all(call[2]["purpose"] == "dpdpa_field_encryption" for call in kms.calls)
+
+
+def test_pseudonymized_kms_context_prevents_cleartext_pii_in_cloudtrail():
+    kms, audit = FakeKMS(), RecordingAudit()
+    secret_key = b"super-secret-pseudonym-key-32b!"
+    encryptor = DPDPAFieldEncryptor(
+        kms, audit, kek_id="alias/dpdpa-personal-data-test", pseudonym_key=secret_key
+    )
+    raw_pid = "asha@example.in"  # Often used as principal ID in legacy apps
+    field = encryptor.encrypt_field("+919876543210", "phone", raw_pid)
+
+    # CloudTrail / KMS context must NOT contain the raw identifier
+    kms_context = kms.calls[0][2]
+    assert kms_context["principal"] != raw_pid
+    assert len(kms_context["principal"]) == 64  # SHA-256 hex
+    assert "asha@example.in" not in repr(kms.calls)
+
+    # Decryption works with the same principal
+    decrypted = encryptor.decrypt_field(field, "phone", raw_pid, requester="support-agent-7")
+    assert decrypted == "+919876543210"
+
+    # Decryption with another principal fails
+    with pytest.raises(InvalidTag):
+        encryptor.decrypt_field(field, "phone", "someone-else@example.in", requester="attacker")
+
+
+def test_fallback_decrypt_for_legacy_unpseudonymized_records():
+    kms, audit = FakeKMS(), RecordingAudit()
+    # 1. Record encrypted BEFORE pseudonym_key is introduced
+    legacy_encryptor = DPDPAFieldEncryptor(kms, audit, kek_id="alias/dpdpa-personal-data-test")
+    raw_pid = "asha@example.in"
+    field = legacy_encryptor.encrypt_field("secret-data", "notes", raw_pid)
+    assert kms.calls[0][2]["principal"] == raw_pid
+
+    # 2. Application upgraded with pseudonym_key
+    upgraded_encryptor = DPDPAFieldEncryptor(
+        kms, audit, kek_id="alias/dpdpa-personal-data-test", pseudonym_key=b"migration-key-32b"
+    )
+
+    # 3. Decrypting legacy record succeeds via transparent fallback
+    decrypted = upgraded_encryptor.decrypt_field(field, "notes", raw_pid, requester="migration-worker")
+    assert decrypted == "secret-data"
+
+    # Verify that the upgraded encryptor first attempted with pseudonym, then fell back to raw
+    recent_decrypt_calls = [c for c in kms.calls if c[0] == "decrypt"]
+    assert len(recent_decrypt_calls) == 2
+    assert recent_decrypt_calls[0][2]["principal"] != raw_pid  # pseudonym attempt failed
+    assert recent_decrypt_calls[1][2]["principal"] == raw_pid  # fallback attempt succeeded
+
+
+def test_wrong_principal_still_fails_with_fallback():
+    kms, audit = FakeKMS(), RecordingAudit()
+    legacy_encryptor = DPDPAFieldEncryptor(kms, audit, kek_id="alias/dpdpa-personal-data-test")
+    field = legacy_encryptor.encrypt_field("secret-data", "notes", "dp-1")
+
+    upgraded_encryptor = DPDPAFieldEncryptor(
+        kms, audit, kek_id="alias/dpdpa-personal-data-test", pseudonym_key=b"migration-key-32b"
+    )
+    with pytest.raises(InvalidTag):
+        upgraded_encryptor.decrypt_field(field, "notes", "dp-2", requester="attacker")

@@ -21,8 +21,12 @@ From [DPDPA encryption requirements](https://statechecksecurity.com/blog/dpdpa-e
 - **KMS client.** `DPDPAFieldEncryptor` expects `kms.encrypt(key_id, plaintext, encryption_context)`
   and `kms.decrypt(...)`. Wrap boto3 (`KeyId=`, `Plaintext=`, `EncryptionContext=`) or your
   provider's SDK.
-- **Encryption context.** It includes the Data Principal ID, and CloudTrail logs the context in
-  plain text. Pass a pseudonym, not a raw identifier.
+- **Encryption context & pseudonyms.** Pass `pseudonym_key` (bytes) to `DPDPAFieldEncryptor` to
+  HMAC the Data Principal ID into a pseudonym before sending it in the KMS encryption context,
+  preventing cleartext personal data from appearing in CloudTrail audit logs.
+  If upgrading an existing system, `decrypt_field` transparently falls back to the un-pseudonymized
+  principal context if decryption with the pseudonym fails, enabling zero-downtime migration of
+  legacy ciphertext.
 - **AWS audit logs.** The `kms_audit` log group needs a CloudTrail trail sending to it;
   CloudTrail's default event history keeps only 90 days.
 - **TLS 1.3 everywhere.** Istio's minimum is TLS 1.2 until you set

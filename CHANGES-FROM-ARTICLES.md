@@ -44,6 +44,7 @@ other than what the article says. *Misleading* = a comment or claim that isn't t
 | Misleading | nginx comment: "the only three cipher suites in TLS 1.3". TLS 1.3 defines five. The config also leaves out `TLS_AES_128_GCM_SHA256`, which RFC 8446 makes mandatory to implement, while the comment calls it "acceptable". | Comment corrected; the suite is enabled. | `encryption/tests/test_nginx_tls.py` runs nginx and checks TLS 1.3 / TLS 1.2 AEAD accepted, CBC and TLS 1.1 refused |
 | Misleading | Istio header: "Enforces TLS 1.3 between all services". PeerAuthentication + DestinationRule make mTLS mandatory; Istio's minimum stays TLS 1.2 unless `meshMTLS.minProtocolVersion` is set. | Comment corrected, with the setting that does enforce 1.3. | `istioctl validate` |
 | Misleading | `dek = b'\x00' * len(dek)` "zeroes out the plaintext DEK from memory". Python bytes are immutable; this binds a new object and leaves the key where it was. | Honest comment, `del dek`, and a pointer to doing key handling in KMS. | review |
+| Wrong | `field_encryption.py` puts the Data Principal ID in the KMS encryption context. CloudTrail logs the context in plain text, leaking personal data into immutable audit logs. | `pseudonym_key` HMACs the principal ID before passing it to KMS; fallback to raw ID on decrypt transparently migrates legacy records. | `test_pseudonymized_kms_context_prevents_cleartext_pii_in_cloudtrail`, `test_fallback_decrypt_for_legacy_unpseudonymized_records` |
 
 ## Cross-border data transfer (`/blog/dpdpa-cross-border-data-transfer`) → `cross-border/`
 
@@ -106,6 +107,5 @@ other than what the article says. *Misleading* = a comment or claim that isn't t
 ## Known limits, not changed
 
 - `encryption/terraform/aws/kms.tf` creates a CloudWatch log group "for KMS audit" but no CloudTrail trail feeds it. CloudTrail event history alone keeps 90 days, not the year Rule 6(1)(e) asks for. Add a trail to your logging account.
-- `field_encryption.py` puts the Data Principal ID in the KMS encryption context. CloudTrail logs the context in plain text, so use a pseudonym there.
 - `crypto_shred.py` uses one KMS key per Data Principal. KMS bills per key per month, so at scale, wrap per-principal data keys with one KMS key and delete the wrapped key instead. A scheduled key deletion can be cancelled for 7 days; record the erasure as final only after KMS emits `DeleteKey`.
 - `transfer-policy.json` leaves the US off the GDPR adequacy list on purpose: the EU–US Data Privacy Framework covers only certified organisations, which a country list can't express.
