@@ -10,14 +10,17 @@ Statutory Scope & Context:
     confirmation is obtained via:
       (a) Reliable identity and age details already held by the fiduciary; or
       (b) Details or a virtual token issued by an authorized entity (e.g. DigiLocker).
-  - Section 9(2): Prohibition of processing causing a detrimental effect on the well-being of the child.
-  - Section 9(3): Statutory prohibitions on tracking, behavioural monitoring, and targeted advertising.
+  - Section 9(2): Absolute prohibition on processing causing a detrimental effect on
+    the well-being of the child. Statutory exemptions under Rule 12 NEVER waive Section 9(2).
+  - Section 9(3): Prohibitions on tracking, behavioural monitoring, and targeted advertising.
   - Section 9(4)–(5), Rule 12 & Fourth Schedule: Statutory exemptions for notified classes of
-    fiduciaries or processing purposes (e.g., educational services, clinical care, child safety).
-
-Note on Scope: Section 9 also applies to processing personal data of persons with disability
-who have a lawful guardian, governed by the verification procedure under Rule 11. That workflow
-is out of scope for this module, which focuses on child data protection under Rule 10.
+    fiduciaries (e.g., clinical establishments, educational institutions, crèches) exempting
+    them from Section 9(1) and 9(3) strictly for the specific processing purposes listed against
+    them in the Fourth Schedule.
+  - Section 9 & Rule 11 Scope Distinction: Section 9 also applies to processing personal data of
+    persons with disability who have a lawful guardian, governed by the verification procedure
+    under Rule 11. That workflow is out of scope for this module, which focuses on child data
+    protection under Rule 10.
 """
 import uuid
 from dataclasses import dataclass, field
@@ -57,6 +60,20 @@ class ParentVerifier(Protocol):
         method: StatutoryVerificationMethod,
         verification_data: bytes | str,
     ) -> bool: ...
+
+
+@dataclass
+class RejectingParentVerifier:
+    """Fail-closed verifier that always rejects. Default for ChildDataGuard to ensure
+    callers explicitly configure an authorized identity verification provider."""
+
+    def verify_adult_guardian(
+        self,
+        guardian_id: str,
+        method: StatutoryVerificationMethod,
+        verification_data: bytes | str,
+    ) -> bool:
+        return False
 
 
 @dataclass
@@ -114,12 +131,11 @@ class ChildDataGuard:
         self,
         verifier: ParentVerifier | None = None,
         exempt_purposes: set[str] | None = None,
-        exempt_fiduciary: bool = False,
     ):
-        self.verifier = verifier or InMemoryParentVerifier()
-        # Section 9(4)-(5), Rule 12 & Fourth Schedule exemptions (e.g. clinical, educational, child safety)
+        # Default to fail-closed verifier so unconfigured guards never grant unverified consent
+        self.verifier = verifier or RejectingParentVerifier()
+        # Section 9(4)-(5), Rule 12 & Fourth Schedule exemptions (purpose-based only, e.g. clinical/educational)
         self.exempt_purposes = set(exempt_purposes or set())
-        self.exempt_fiduciary = exempt_fiduciary
         # Keyed by child_principal_id -> list of consent records (supporting multiple consents over time)
         self.consents: dict[str, list[ParentalConsentRecord]] = {}
 
@@ -177,8 +193,13 @@ class ChildDataGuard:
         return False
 
     def is_exempt(self, purpose_key: str) -> bool:
-        """Checks if fiduciary or purpose is exempt under Section 9(4)-(5) / Rule 12 / Fourth Schedule."""
-        return self.exempt_fiduciary or (purpose_key in self.exempt_purposes)
+        """Checks if purpose is exempt under Section 9(4)-(5), Rule 12 & Fourth Schedule.
+
+        Note: Statutory exemptions relieve the fiduciary from Section 9(1) verifiable consent
+        and Section 9(3) tracking/ad restrictions strictly for the listed purposes (e.g., healthcare,
+        education, safety). Exemptions NEVER waive Section 9(2) (detrimental effects on child).
+        """
+        return purpose_key in self.exempt_purposes
 
     def validate_processing(
         self,

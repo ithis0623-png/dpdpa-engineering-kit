@@ -1,26 +1,17 @@
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
-
-from consent.parental_consent import (
+from parental_consent import (
     ChildDataGuard,
     ChildProcessingViolation,
     GuardianRelationship,
+    InMemoryParentVerifier,
     ProhibitedProcessingType,
+    RejectingParentVerifier,
     StatutoryVerificationMethod,
     calculate_age,
     is_child,
 )
-
-
-class RejectingParentVerifier:
-    def verify_adult_guardian(
-        self,
-        guardian_id: str,
-        method: StatutoryVerificationMethod,
-        verification_data: bytes | str,
-    ) -> bool:
-        return False
 
 
 class TestAgeAndChildStatus:
@@ -39,8 +30,21 @@ class TestAgeAndChildStatus:
 
 
 class TestRule10VerificationAndConsent:
-    def test_registration_with_existing_records(self):
+    def test_default_guard_fails_closed_without_explicit_verifier(self):
+        """Unconfigured ChildDataGuard defaults to RejectingParentVerifier (fails closed)."""
         guard = ChildDataGuard()
+        with pytest.raises(ChildProcessingViolation, match="Rule 10 verification failed"):
+            guard.register_parental_consent(
+                child_principal_id="c-0",
+                guardian_principal_id="g-0",
+                relationship=GuardianRelationship.PARENT,
+                verification_method=StatutoryVerificationMethod.EXISTING_FIDUCIARY_RECORDS,
+                verification_data="unconfigured_data",
+                approved_purposes=["app_access"],
+            )
+
+    def test_registration_with_existing_records(self):
+        guard = ChildDataGuard(verifier=InMemoryParentVerifier())
         record = guard.register_parental_consent(
             child_principal_id="child-001",
             guardian_principal_id="parent-001",
@@ -56,7 +60,7 @@ class TestRule10VerificationAndConsent:
         assert record.is_active() is True
 
     def test_registration_with_authorized_entity_token(self):
-        guard = ChildDataGuard()
+        guard = ChildDataGuard(verifier=InMemoryParentVerifier())
         record = guard.register_parental_consent(
             child_principal_id="child-002",
             guardian_principal_id="guardian-002",
@@ -112,7 +116,7 @@ class TestRule10VerificationAndConsent:
 
 class TestMultiConsentAndWithdrawal:
     def test_multiple_consents_retained_per_child(self):
-        guard = ChildDataGuard()
+        guard = ChildDataGuard(verifier=InMemoryParentVerifier())
         c1 = guard.register_parental_consent(
             child_principal_id="child-10",
             guardian_principal_id="parent-10",
@@ -137,7 +141,7 @@ class TestMultiConsentAndWithdrawal:
         assert guard.validate_processing(dob, "child-10", "purpose_b") is True
 
     def test_withdrawal_per_section_6_4(self):
-        guard = ChildDataGuard()
+        guard = ChildDataGuard(verifier=InMemoryParentVerifier())
         c1 = guard.register_parental_consent(
             child_principal_id="child-11",
             guardian_principal_id="parent-11",
@@ -160,11 +164,11 @@ class TestMultiConsentAndWithdrawal:
             guard.validate_processing(dob, "child-11", "purpose_a")
 
     def test_withdrawal_unknown_consent_returns_false(self):
-        guard = ChildDataGuard()
+        guard = ChildDataGuard(verifier=InMemoryParentVerifier())
         assert guard.withdraw_parental_consent("non-existent-id") is False
 
     def test_expired_consent_is_not_active(self):
-        guard = ChildDataGuard()
+        guard = ChildDataGuard(verifier=InMemoryParentVerifier())
         past = datetime.now(timezone.utc) - timedelta(hours=1)
         guard.register_parental_consent(
             child_principal_id="child-12",
@@ -192,7 +196,7 @@ class TestSection93Prohibitions:
         ],
     )
     def test_prohibited_processing_rejected_for_child(self, prohibited):
-        guard = ChildDataGuard()
+        guard = ChildDataGuard(verifier=InMemoryParentVerifier())
         guard.register_parental_consent(
             child_principal_id="child-20",
             guardian_principal_id="parent-20",
@@ -224,7 +228,7 @@ class TestSection93Prohibitions:
 
 class TestStatutoryExemptions:
     def test_exempt_purpose_permits_processing_without_consent(self):
-        # Section 9(4)-(5), Rule 12 & Fourth Schedule (e.g. clinical / child safety)
+        # Section 9(4)-(5), Rule 12 & Fourth Schedule (e.g. clinical care / child safety)
         guard = ChildDataGuard(exempt_purposes={"emergency_medical_triage", "child_safety_monitoring"})
         child_dob = date(2015, 1, 1)
 
@@ -246,13 +250,13 @@ class TestStatutoryExemptions:
             activity_type="tracking",
         ) is True
 
-    def test_exempt_fiduciary_permits_processing(self):
-        guard = ChildDataGuard(exempt_fiduciary=True)
+    def test_exempt_purpose_for_educational_curriculum(self):
+        # Fourth Schedule: educational institutions for education delivery purposes
+        guard = ChildDataGuard(exempt_purposes={"educational_curriculum_delivery"})
         child_dob = date(2015, 1, 1)
 
         assert guard.validate_processing(
             child_dob=child_dob,
-            child_principal_id="child-exempt-org",
-            purpose_key="educational_platform_analytics",
-            activity_type="tracking",
+            child_principal_id="student-01",
+            purpose_key="educational_curriculum_delivery",
         ) is True
