@@ -71,7 +71,7 @@ def rights():
     inventory = InMemoryInventory(
         systems={
             "crm": {"system_name": "CRM", "purposes": ["support"],
-                    "data": {"dp-1": [{"field": "email", "value": "asha@example.in"}]}},
+                    "data": {"dp-1": [{"field": "email", "value": "asha@example.com"}]}},
             "billing": {"system_name": "Billing", "purposes": ["invoicing"],
                         "data": {"dp-1": [{"field": "gstin", "value": "29ABCDE1234F1Z5"}]}},
             "analytics": {"system_name": "Analytics", "purposes": ["product"], "data": {"dp-2": []}},
@@ -100,7 +100,7 @@ def test_erasure_respects_legal_holds_and_says_so(rights):
     assert "dp-1" in inventory.systems["billing"]["data"]
     (event,) = audit.events
     assert event["systems"] == ["crm"]
-    assert "asha@example.in" not in str(event)
+    assert "asha@example.com" not in str(event)
 
 
 def test_erasure_without_holds_is_completed(rights):
@@ -117,7 +117,7 @@ def test_correction_updates_held_systems_and_notifies_downstream(rights):
     """
     service, inventory, audit = rights
     corrections = {
-        "crm": {"email": "asha.new@example.in"},
+        "crm": {"email": "asha.new@example.com"},
         "billing": {"gstin": "29ABCDE9999F1Z9"},
     }
 
@@ -133,7 +133,7 @@ def test_correction_updates_held_systems_and_notifies_downstream(rights):
 
     # Verify CRM (non-held) was updated in place
     crm_data = inventory.systems["crm"]["data"]["dp-1"][0]
-    assert crm_data["value"] == "asha.new@example.in"
+    assert crm_data["value"] == "asha.new@example.com"
 
     # Verify Billing (held) original preserved in place
     billing_data = inventory.systems["billing"]["data"]["dp-1"][0]
@@ -149,7 +149,7 @@ def test_correction_updates_held_systems_and_notifies_downstream(rights):
     assert service.notifier.notifications[0]["signal"] == "record_updated_refetch"
 
     # PII kept out of audit log
-    assert "asha.new@example.in" not in repr(audit.events)
+    assert "asha.new@example.com" not in repr(audit.events)
     assert "29ABCDE9999F1Z9" not in repr(audit.events)
 
 
@@ -171,7 +171,7 @@ def test_notifier_does_not_overshare_fields(rights):
         {"name": "SupportDesk", "role": "processor", "fields": ["email"]},
     ]
 
-    corrections = {"crm": {"email": "asha.updated@example.in"}}
+    corrections = {"crm": {"email": "asha.updated@example.com"}}
     resp = service.handle_correction_request("dp-1", corrections)
     assert resp["status"] == "completed"
 
@@ -191,7 +191,7 @@ def test_nomination_registration_and_retrieval(rights):
     nominee = {
         "name": "Priya Sharma",
         "relationship": "spouse",
-        "contact": "priya@example.in",
+        "contact": "priya@example.com",
     }
 
     resp = service.handle_nomination_request("dp-1", nominee)
@@ -205,7 +205,7 @@ def test_nomination_registration_and_retrieval(rights):
 
     # Audit log keeps personal data out of logs
     assert "Priya Sharma" not in repr(audit.events)
-    assert "priya@example.in" not in repr(audit.events)
+    assert "priya@example.com" not in repr(audit.events)
     nom_event = [e for e in audit.events if e.get("event") == "nomination_registered"][0]
     assert nom_event["nominee_ref"] == resp["nominee_ref"]
     assert nom_event["relationship"] == "spouse"
@@ -217,3 +217,13 @@ def test_nomination_rejected_without_name(rights):
     assert resp["status"] == "rejected"
     assert resp["reason"] == "invalid_nominee_details"
 
+
+def test_principal_may_nominate_more_than_one_individual(rights):
+    # Rule 14(4): "nominate one or more individuals".
+    service, inventory, audit = rights
+    first = service.handle_nomination_request("dp-1", {"name": "Nominee One", "relationship": "spouse"})
+    second = service.handle_nomination_request("dp-1", {"name": "Nominee Two", "relationship": "child"})
+    assert first["nominee_ref"] != second["nominee_ref"]
+    refs = [n["nominee_ref"] for n in inventory.get_nominations("dp-1")]
+    assert refs == [first["nominee_ref"], second["nominee_ref"]]
+    assert service.get_nomination("dp-1")["nominee_ref"] == second["nominee_ref"]

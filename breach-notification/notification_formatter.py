@@ -39,23 +39,27 @@ class FiduciaryContact:
 class PrincipalIntimation:
     """Intimation to an affected Data Principal under Rule 7(1).
 
-    Must be sent without delay to each affected Data Principal.
-    Statutory contents:
-      - Rule 7(1)(a): Description of the breach, including nature, extent, timing, and location
-      - Rule 7(1)(b): Consequences of the breach, especially those relevant to this principal
-      - Rule 7(1)(c): Measures taken or being taken by the Data Fiduciary to mitigate damage
-      - Rule 7(1)(d): Recommended safety steps for the Data Principal
-      - Rule 7(1)(e): Contact details of a person able to respond for the fiduciary
+    Must be sent without delay to each affected Data Principal, in a concise, clear and
+    plain manner. Statutory contents, in the Rule's words:
+      - Rule 7(1)(a): a description of the breach, including its nature, extent and the
+        timing of its occurrence (location is NOT a 7(1)(a) element; it belongs to the
+        Board notice under Rule 7(2)(a))
+      - Rule 7(1)(b): the consequences relevant to her, that are likely to arise
+      - Rule 7(1)(c): the measures implemented and being implemented, if any, to mitigate risk
+      - Rule 7(1)(d): the safety measures she may take to protect her interests
+      - Rule 7(1)(e): business contact information of a person able to respond to her queries
+    `location`, `compromised_categories` and `delivery_channel` are this kit's additions,
+    kept because they help a reader; they are not statutory elements.
     """
     intimation_id: str
     principal_id: str
     nature: str
     extent: str                           # Rule 7(1)(a): extent of the breach
-    timing: str                           # Rule 7(1)(a): timing when occurred / detected
-    location: str                         # Rule 7(1)(a): location / affected systems
-    consequences_for_principal: str       # Rule 7(1)(b): consequences relevant to principal
-    compromised_categories: list[str]
-    mitigation_measures: list[str]        # Rule 7(1)(c)
+    timing: str                           # Rule 7(1)(a): timing of its occurrence
+    location: str                         # supplementary; not a Rule 7(1)(a) element; may be ""
+    consequences_for_principal: str       # Rule 7(1)(b): consequences relevant to the principal
+    compromised_categories: list[str]     # supplementary (kit)
+    mitigation_measures: list[str]        # Rule 7(1)(c), "if any": may be empty
     recommended_safety_steps: list[str]   # Rule 7(1)(d)
     contact: dict                         # Rule 7(1)(e)
     language_code: str
@@ -86,13 +90,16 @@ class BoardFirstIntimation:
     """First intimation to the Data Protection Board of India under Rule 7(2)(a).
 
     Must be sent to the Board without delay upon becoming aware of a personal data breach.
-    Statutory contents per Rule 7(2)(a):
-      - Nature of the personal data breach
-      - Extent of the personal data breach
-      - Timing of the personal data breach (when occurred, when detected)
-      - Location of the personal data breach
-      - Likely impact of the personal data breach
-      - Contact details of a person able to respond for the fiduciary
+    Statutory contents per Rule 7(2)(a): "a description of the breach, including its
+    nature, extent, timing and location of occurrence and the likely impact". That is:
+      - nature
+      - extent
+      - timing of occurrence
+      - location of occurrence
+      - likely impact
+    Supplementary, not required by 7(2)(a) but useful to the Board and to the later
+    7(2)(b) report: detection time, the fiduciary's contact details, immediate mitigation,
+    and the moment the fiduciary became aware (which starts the 7(2)(b) 72-hour clock).
     """
     intimation_id: str
     incident_id: str
@@ -216,13 +223,14 @@ class BreachIntimationBuilder:
     ) -> PrincipalIntimation:
         """Constructs an intimation to an affected Data Principal under Rule 7(1)."""
         if not compromised_categories:
-            raise ValueError("At least one compromised data category must be declared (Rule 7(1))")
+            # A kit requirement so the notice names what was exposed; Rule 7(1) has no
+            # data-category element.
+            raise ValueError("At least one compromised data category must be declared (kit requirement, not Rule 7(1))")
         if not recommended_safety_steps:
-            raise ValueError("Recommended safety steps for the principal must be provided (Rule 7(1)(d))")
-        if not extent.strip():
-            raise ValueError("Extent of the breach is required (Rule 7(1)(a))")
-        if not timing.strip() or not location.strip():
-            raise ValueError("Timing and location of the breach are required (Rule 7(1)(a))")
+            raise ValueError("Safety measures the principal may take are required (Rule 7(1)(d))")
+        if not nature.strip() or not extent.strip() or not timing.strip():
+            raise ValueError("Nature, extent and timing of occurrence are required (Rule 7(1)(a))")
+        # location is not a Rule 7(1)(a) element and may be empty.
         if not delivery_channel.strip():
             raise ValueError("delivery_channel is required per Rule 7(1) (e.g. user_account, email, sms)")
 
@@ -302,12 +310,16 @@ class BreachIntimationBuilder:
             raise ValueError("Rule 7(2)(b)(i) requires updated and detailed description")
         if not broad_facts_and_reasons.strip():
             raise ValueError("Rule 7(2)(b)(ii) requires broad facts and circumstances that led to breach")
-        if not risk_mitigation_measures:
-            raise ValueError("Rule 7(2)(b)(iii) requires measures taken or proposed to mitigate risk")
+        # Rule 7(2)(b)(iii) reads "measures implemented or proposed, if any, to mitigate
+        # risk": an empty list is a lawful answer, so it is not rejected here.
         if not remedial_measures_preventing_recurrence:
             raise ValueError("Rule 7(2)(b)(v) requires remedial measures taken to prevent recurrence")
         if "count_sent" not in principal_intimations_report:
-            raise ValueError("Rule 7(2)(b)(vi) requires report on intimations to Data Principals with count_sent")
+            # Rule 7(2)(b)(vi) requires "a report regarding the intimations given to affected
+            # Data Principals"; the count is how this kit makes that report checkable.
+            raise ValueError(
+                "principal_intimations_report needs count_sent (kit requirement inside the Rule 7(2)(b)(vi) report)"
+            )
 
         cats = [c.value if isinstance(c, DataCategory) else str(c) for c in (affected_categories or [])]
         now = datetime.now(timezone.utc)

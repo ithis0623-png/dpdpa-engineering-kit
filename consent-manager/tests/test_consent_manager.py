@@ -43,7 +43,7 @@ def _stored_values(record) -> str:
 
 def test_grant_stores_only_a_hash_and_forwards_the_token_unchanged():
     store, gateway = RecordingStore(), RecordingGateway()
-    token = _encrypt(b'{"purpose": "marketing", "email": "asha@example.in"}')
+    token = _encrypt(b'{"purpose": "marketing", "email": "asha@example.com"}')
 
     record = ConsentManagerRouter(store, gateway).route_consent_grant("p-1", "fid-abc", "marketing", token)
 
@@ -51,7 +51,7 @@ def test_grant_stores_only_a_hash_and_forwards_the_token_unchanged():
     assert record.consent_token_hash == sha256(token).hexdigest()
     assert store.records == [record]
     assert gateway.forwarded == [("fid-abc", token)]
-    assert "asha@example.in" not in _stored_values(record)
+    assert "asha@example.com" not in _stored_values(record)
     assert token.hex() not in _stored_values(record)
 
 
