@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,7 @@ def test_principal_intimation_rule_7_1(contact):
     notice = builder.build_principal_intimation(
         principal_id="dp-9988",
         nature="Unauthorised access to user database replica",
+        extent="Single database table replica containing 1200 user records",
         timing="2026-11-01 14:30 UTC",
         location="ap-south-1 replica database",
         consequences_for_principal="Your contact number may receive targeted phishing SMS or calls.",
@@ -105,6 +107,7 @@ def test_principal_intimation_rule_7_1(contact):
 
     d = notice.to_dict()
     assert d["principal_id"] == "dp-9988"
+    assert d["extent"] == "Single database table replica containing 1200 user records"
     assert d["timing"] == "2026-11-01 14:30 UTC"
     assert d["location"] == "ap-south-1 replica database"
     assert "phishing" in d["consequences_for_principal"]
@@ -118,6 +121,7 @@ def test_principal_intimation_validation_errors(contact):
         builder.build_principal_intimation(
             principal_id="dp-1",
             nature="leak",
+            extent="one cluster",
             timing="",
             location="",
             consequences_for_principal="test",
@@ -126,8 +130,22 @@ def test_principal_intimation_validation_errors(contact):
             recommended_safety_steps=["change password"],
         )
 
+    with pytest.raises(ValueError, match="Extent of the breach is required"):
+        builder.build_principal_intimation(
+            principal_id="dp-1",
+            nature="leak",
+            extent="   ",
+            timing="2026-11-01",
+            location="server-1",
+            consequences_for_principal="test",
+            compromised_categories=[DataCategory.CONTACT],
+            mitigation_measures=["patched"],
+            recommended_safety_steps=["change password"],
+        )
 
-def test_board_first_intimation_rule_7_2_a(contact):
+
+def test_board_first_intimation_rule_7_2_a_without_mandatory_mitigation(contact):
+    """First notice must not be blocked when immediate mitigation is not yet available."""
     builder = BreachIntimationBuilder(contact)
     first_notice = builder.build_board_first_intimation(
         incident_id="INC-2026-101",
@@ -135,40 +153,56 @@ def test_board_first_intimation_rule_7_2_a(contact):
         extent_affected_principals=1200,
         location="Core Accounts Cluster, ap-south-1",
         likely_impact="Risk of identity theft and credential reuse for 1200 principals",
-        immediate_mitigation=["Revoked compromised API token", "Rotated database credentials"],
     )
 
     data = first_notice.to_dict()
     assert data["incident_id"] == "INC-2026-101"
     assert data["extent_affected_principals"] == 1200
     assert "detected_at" in data["timing"]
-    assert len(data["immediate_mitigation"]) == 2
+    assert data["immediate_mitigation"] == []
 
 
-def test_board_detailed_report_rule_7_2_b(contact):
+def test_board_detailed_report_rule_7_2_b_and_72h_clock(contact):
     builder = BreachIntimationBuilder(contact)
+    aware_time = datetime(2026, 11, 1, 10, 0, tzinfo=timezone.utc)
+
     report = builder.build_board_detailed_report(
         incident_id="INC-2026-101",
         first_intimation_id="INT-FIRST-001",
-        root_cause_and_timeline=(
+        became_aware_at=aware_time,
+        updated_description="Detailed assessment confirms 1200 identity & financial records exfiltrated.",
+        broad_facts_and_reasons=(
             "Root cause was an exposed staging credential. Access began at 10:00, detected at 10:45."
         ),
-        affected_categories=[DataCategory.IDENTITY, DataCategory.FINANCIAL],
-        affected_volume_records=2500,
-        consequences_assessment="Assessed as moderate-high risk; no core banking data touched.",
-        remedial_measures_taken=["Staging environment isolated", "All secrets rotated in AWS Secrets Manager"],
-        remedial_measures_planned=["Mandatory hardware MFA rollout across all engineering accounts"],
+        risk_mitigation_measures=["Staging environment isolated", "All secrets rotated in AWS Secrets Manager"],
+        findings_on_person_causing_breach="External unauthorized attacker using Tor exit node IPs",
+        remedial_measures_preventing_recurrence=["Mandatory hardware MFA rollout across all engineering accounts"],
         principal_intimations_report={
             "count_sent": 1200,
             "channels_used": ["email", "sms"],
             "date_commenced": "2026-11-02T12:00:00Z",
             "summary": "1,192 delivered, 8 bounced",
         },
+        affected_categories=[DataCategory.IDENTITY, DataCategory.FINANCIAL],
+        affected_volume_records=2500,
         follow_up_actions=["Scheduled external penetration testing with CERT-In empaneled auditor"],
     )
 
     d = report.to_dict()
     assert d["report_id"]
+    assert d["became_aware_at"] == aware_time.isoformat()
+    assert d["detailed_report_due_at"] == (aware_time + timedelta(hours=72)).isoformat()
+    assert d["findings_on_person_causing_breach"] == "External unauthorized attacker using Tor exit node IPs"
     assert d["affected_volume_records"] == 2500
     assert d["principal_intimations_report"]["count_sent"] == 1200
-    assert len(d["remedial_measures_taken"]) == 2
+    assert len(d["risk_mitigation_measures"]) == 2
+
+    # Check 72-hour clock
+    assert report.is_overdue(as_of=aware_time + timedelta(hours=71)) is False
+    assert report.is_overdue(as_of=aware_time + timedelta(hours=73)) is True
+
+    # Board extension
+    report.board_extended_deadline = aware_time + timedelta(hours=120)
+    assert report.is_overdue(as_of=aware_time + timedelta(hours=73)) is False
+    assert report.is_overdue(as_of=aware_time + timedelta(hours=121)) is True
+
