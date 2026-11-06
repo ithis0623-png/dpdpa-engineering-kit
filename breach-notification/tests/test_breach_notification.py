@@ -84,7 +84,7 @@ def test_savedsearch_is_valid_conf_and_matches_the_classifier():
 def contact():
     return FiduciaryContact(
         name="Ananya Roy",
-        email="privacy-contact@example.in",
+        email="privacy-contact@example.com",
         phone="+91-11-23456789",
         role_or_title="Designated Grievance & Privacy Officer",
     )
@@ -150,7 +150,7 @@ def test_principal_intimation_custom_delivery_channel(contact):
 
 def test_principal_intimation_validation_errors(contact):
     builder = BreachIntimationBuilder(contact)
-    with pytest.raises(ValueError, match="Timing and location"):
+    with pytest.raises(ValueError, match="Nature, extent and timing"):
         builder.build_principal_intimation(
             principal_id="dp-1",
             nature="leak",
@@ -163,7 +163,7 @@ def test_principal_intimation_validation_errors(contact):
             recommended_safety_steps=["change password"],
         )
 
-    with pytest.raises(ValueError, match="Extent of the breach is required"):
+    with pytest.raises(ValueError, match="Nature, extent and timing"):
         builder.build_principal_intimation(
             principal_id="dp-1",
             nature="leak",

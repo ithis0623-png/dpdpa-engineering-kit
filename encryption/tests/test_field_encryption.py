@@ -43,10 +43,10 @@ def enc():
 
 def test_round_trip(enc):
     encryptor, _, _ = enc
-    field = encryptor.encrypt_field("asha@example.in", "email", "dp-1")
+    field = encryptor.encrypt_field("asha@example.com", "email", "dp-1")
     assert b"asha" not in field.ciphertext
     assert len(field.nonce) == 12
-    assert encryptor.decrypt_field(field, "email", "dp-1", requester="support-agent-7") == "asha@example.in"
+    assert encryptor.decrypt_field(field, "email", "dp-1", requester="support-agent-7") == "asha@example.com"
 
 
 def test_each_record_gets_its_own_dek_and_nonce(enc):
@@ -61,7 +61,7 @@ def test_each_record_gets_its_own_dek_and_nonce(enc):
 def test_ciphertext_cannot_be_moved_to_another_principal(enc):
     """AAD and the KMS encryption context bind the ciphertext to its field and Data Principal."""
     encryptor, _, _ = enc
-    field = encryptor.encrypt_field("asha@example.in", "email", "dp-1")
+    field = encryptor.encrypt_field("asha@example.com", "email", "dp-1")
     with pytest.raises(InvalidTag):
         encryptor.decrypt_field(field, "email", "dp-2", requester="attacker")
 
@@ -75,7 +75,7 @@ def test_ciphertext_cannot_be_moved_to_another_field(enc):
 
 def test_tampered_ciphertext_is_rejected(enc):
     encryptor, _, _ = enc
-    field = encryptor.encrypt_field("asha@example.in", "email", "dp-1")
+    field = encryptor.encrypt_field("asha@example.com", "email", "dp-1")
     field.ciphertext = bytes([field.ciphertext[0] ^ 1]) + field.ciphertext[1:]
     with pytest.raises(InvalidTag):
         encryptor.decrypt_field(field, "email", "dp-1", requester="support-agent-7")
@@ -83,11 +83,11 @@ def test_tampered_ciphertext_is_rejected(enc):
 
 def test_both_operations_are_audited_without_the_plaintext(enc):
     encryptor, kms, audit = enc
-    field = encryptor.encrypt_field("asha@example.in", "email", "dp-1")
+    field = encryptor.encrypt_field("asha@example.com", "email", "dp-1")
     encryptor.decrypt_field(field, "email", "dp-1", requester="support-agent-7")
     assert [e["event"] for e in audit.events] == ["field_encrypted", "field_decrypted"]
     assert audit.events[1]["requester"] == "support-agent-7"
-    assert "asha@example.in" not in repr(audit.events)
+    assert "asha@example.com" not in repr(audit.events)
     assert all(call[2]["purpose"] == "dpdpa_field_encryption" for call in kms.calls)
 
 
@@ -97,14 +97,14 @@ def test_pseudonymized_kms_context_prevents_cleartext_pii_in_cloudtrail():
     encryptor = DPDPAFieldEncryptor(
         kms, audit, kek_id="alias/dpdpa-personal-data-test", pseudonym_key=secret_key
     )
-    raw_pid = "asha@example.in"  # Often used as principal ID in legacy apps
+    raw_pid = "asha@example.com"  # Often used as principal ID in legacy apps
     field = encryptor.encrypt_field("+919876543210", "phone", raw_pid)
 
     # CloudTrail / KMS context must NOT contain the raw identifier
     kms_context = kms.calls[0][2]
     assert kms_context["principal"] != raw_pid
     assert len(kms_context["principal"]) == 64  # SHA-256 hex
-    assert "asha@example.in" not in repr(kms.calls)
+    assert "asha@example.com" not in repr(kms.calls)
 
     # Decryption works with the same principal
     decrypted = encryptor.decrypt_field(field, "phone", raw_pid, requester="support-agent-7")
@@ -112,14 +112,14 @@ def test_pseudonymized_kms_context_prevents_cleartext_pii_in_cloudtrail():
 
     # Decryption with another principal fails
     with pytest.raises(InvalidTag):
-        encryptor.decrypt_field(field, "phone", "someone-else@example.in", requester="attacker")
+        encryptor.decrypt_field(field, "phone", "someone-else@example.com", requester="attacker")
 
 
 def test_fallback_decrypt_for_legacy_unpseudonymized_records():
     kms, audit = FakeKMS(), RecordingAudit()
     # 1. Record encrypted BEFORE pseudonym_key is introduced
     legacy_encryptor = DPDPAFieldEncryptor(kms, audit, kek_id="alias/dpdpa-personal-data-test")
-    raw_pid = "asha@example.in"
+    raw_pid = "asha@example.com"
     field = legacy_encryptor.encrypt_field("secret-data", "notes", raw_pid)
     assert kms.calls[0][2]["principal"] == raw_pid
 
@@ -157,7 +157,7 @@ def test_non_mismatch_error_is_not_retried_with_raw_id():
             raise ConnectionError("KMS connection timed out")
 
     kms, audit = FailingKMS(), RecordingAudit()
-    raw_pid = "asha@example.in"
+    raw_pid = "asha@example.com"
     encryptor = DPDPAFieldEncryptor(
         kms,
         audit,
@@ -180,7 +180,7 @@ def test_non_mismatch_error_is_not_retried_with_raw_id():
 def test_rewrap_field_migrates_legacy_record_and_disables_fallback():
     kms, audit = FakeKMS(), RecordingAudit()
     legacy_encryptor = DPDPAFieldEncryptor(kms, audit, kek_id="alias/dpdpa-personal-data-test")
-    raw_pid = "asha@example.in"
+    raw_pid = "asha@example.com"
     legacy_field = legacy_encryptor.encrypt_field("secret-payload", "notes", raw_pid)
 
     # Rewrap with migration encryptor

@@ -250,13 +250,27 @@ class TestStatutoryExemptions:
             activity_type="tracking",
         ) is True
 
-    def test_exempt_purpose_for_educational_curriculum(self):
-        # Fourth Schedule: educational institutions for education delivery purposes
-        guard = ChildDataGuard(exempt_purposes={"educational_curriculum_delivery"})
+    def test_educational_institution_exemption_is_conditioned_on_monitoring(self):
+        # Fourth Schedule Part A item 3: an educational institution is exempt from 9(1)/9(3)
+        # only where processing is "restricted to tracking and behavioural monitoring" for its
+        # educational activities or for the safety of enrolled children. The key names that
+        # conditioned processing; a general "curriculum delivery" purpose is not an entry.
+        guard = ChildDataGuard(exempt_purposes={"educational_activity_monitoring"})
         child_dob = date(2015, 1, 1)
 
         assert guard.validate_processing(
             child_dob=child_dob,
             child_principal_id="student-01",
-            purpose_key="educational_curriculum_delivery",
+            purpose_key="educational_activity_monitoring",
+            activity_type="behavioural_monitoring",
         ) is True
+
+    def test_section_9_2_is_never_waived_by_an_exemption(self):
+        guard = ChildDataGuard(exempt_purposes={"educational_activity_monitoring"})
+        with pytest.raises(ChildProcessingViolation, match="Section 9\\(2\\)"):
+            guard.validate_processing(
+                child_dob=date(2015, 1, 1),
+                child_principal_id="student-02",
+                purpose_key="educational_activity_monitoring",
+                detrimental_effect=True,
+            )

@@ -5,18 +5,28 @@ Implements Verifiable Parental Consent (VPC) and Child Data Protection safeguard
 mandated by DPDPA Section 9 and DPDP Rules, 2025 Rule 10, Rule 12 and the Fourth Schedule.
 
 Statutory Scope & Context:
-  - Section 9(1) & Rule 10: The Data Fiduciary must confirm that the parent or lawful
-    guardian is an identifiable adult before obtaining verifiable consent. Under Rule 10,
-    confirmation is obtained via:
-      (a) Reliable identity and age details already held by the fiduciary; or
-      (b) Details or a virtual token issued by an authorized entity (e.g. DigiLocker).
-  - Section 9(2): Absolute prohibition on processing causing a detrimental effect on
-    the well-being of the child. Statutory exemptions under Rule 12 NEVER waive Section 9(2).
-  - Section 9(3): Prohibitions on tracking, behavioural monitoring, and targeted advertising.
-  - Section 9(4)–(5), Rule 12 & Fourth Schedule: Statutory exemptions for notified classes of
-    fiduciaries (e.g., clinical establishments, educational institutions, crèches) exempting
-    them from Section 9(1) and 9(3) strictly for the specific processing purposes listed against
-    them in the Fourth Schedule.
+  - Section 9(1) & Rule 10(1): The Data Fiduciary must confirm that the person giving
+    consent as the parent is an identifiable adult. Rule 10(1) allows that to rest on:
+      (a) reliable details of identity and age already available with the fiduciary; or
+      (b) details of identity and age voluntarily provided (i) by the individual, or
+          (ii) through a virtual token mapped to such details, issued by an authorised
+          entity (Rule 10(2) names Digital Locker service providers among these).
+    Only the token in (b)(ii) comes from an authorised entity; (b)(i) details may be
+    volunteered by the individual.
+  - Section 9(2): no processing "likely to cause any detrimental effect on the well-being
+    of a child". Rule 12 disapplies only 9(1) and 9(3); nothing disapplies 9(2). This module
+    enforces 9(2) through the `detrimental_effect` flag on `validate_processing`.
+  - Section 9(3): no tracking or behavioural monitoring of children, and no targeted
+    advertising directed at children.
+  - Section 9(4), Rule 12 & Fourth Schedule: 9(1) and 9(3) do not apply to the classes of
+    Data Fiduciary in Part A (clinical establishments, educational institutions, crèches,
+    transport providers and others) ONLY for the conditioned processing listed against each
+    (for example, an educational institution: "restricted to tracking and behavioural
+    monitoring for the educational activities of such institution or in the interests of
+    safety of children"), and to the purposes in Part B under their conditions. The
+    exemption attaches to the class plus the condition, never to a purpose alone.
+    Section 9(5) is a different mechanism (an age above which a notified fiduciary is
+    exempt) and is not modelled here.
   - Section 9 & Rule 11 Scope Distinction: Section 9 also applies to processing personal data of
     persons with disability who have a lawful guardian, governed by the verification procedure
     under Rule 11. That workflow is out of scope for this module, which focuses on child data
@@ -37,8 +47,9 @@ class GuardianRelationship(Enum):
 
 class StatutoryVerificationMethod(Enum):
     """Methods prescribed by Rule 10 to confirm the parent is an identifiable adult."""
-    EXISTING_FIDUCIARY_RECORDS = "existing_fiduciary_records"  # Rule 10(a)
-    AUTHORIZED_ENTITY_TOKEN = "authorized_entity_token"  # Rule 10(b), e.g., DigiLocker # noqa: S105
+    EXISTING_FIDUCIARY_RECORDS = "existing_fiduciary_records"  # Rule 10(1)(a)
+    VOLUNTARY_DETAILS = "voluntary_details"  # Rule 10(1)(b)(i): details provided by the individual
+    AUTHORIZED_ENTITY_TOKEN = "authorized_entity_token"  # Rule 10(1)(b)(ii), e.g. a Digital Locker token # noqa: S105
 
 
 class ProhibitedProcessingType(Enum):
@@ -134,7 +145,10 @@ class ChildDataGuard:
     ):
         # Default to fail-closed verifier so unconfigured guards never grant unverified consent
         self.verifier = verifier or RejectingParentVerifier()
-        # Section 9(4)-(5), Rule 12 & Fourth Schedule exemptions (purpose-based only, e.g. clinical/educational)
+        # Rule 12 & Fourth Schedule exemptions. Each key must name the CONDITIONED processing of
+        # a Schedule entry that applies to this fiduciary's class (for example
+        # "safety_monitoring" for an educational institution under Part A item 3), not a
+        # general purpose; the Schedule exempts a class for a condition, never a purpose alone.
         self.exempt_purposes = set(exempt_purposes or set())
         # Keyed by child_principal_id -> list of consent records (supporting multiple consents over time)
         self.consents: dict[str, list[ParentalConsentRecord]] = {}
@@ -193,11 +207,11 @@ class ChildDataGuard:
         return False
 
     def is_exempt(self, purpose_key: str) -> bool:
-        """Checks if purpose is exempt under Section 9(4)-(5), Rule 12 & Fourth Schedule.
+        """Checks if a conditioned processing key is exempt under Rule 12 and the Fourth Schedule.
 
-        Note: Statutory exemptions relieve the fiduciary from Section 9(1) verifiable consent
-        and Section 9(3) tracking/ad restrictions strictly for the listed purposes (e.g., healthcare,
-        education, safety). Exemptions NEVER waive Section 9(2) (detrimental effects on child).
+        Rule 12 disapplies Section 9(1) (verifiable parental consent) and 9(3) (tracking,
+        behavioural monitoring, targeted advertising) for the Schedule's classes, only for the
+        processing listed against each class. It never disapplies Section 9(2).
         """
         return purpose_key in self.exempt_purposes
 
@@ -208,18 +222,30 @@ class ChildDataGuard:
         purpose_key: str,
         activity_type: str | None = None,
         now: datetime | None = None,
+        detrimental_effect: bool = False,
     ) -> bool:
-        """Validates whether processing is permitted under Section 9, checking consent and exemptions."""
+        """Validates whether processing is permitted under Section 9, checking consent and exemptions.
+
+        `detrimental_effect` is the caller's own assessment that the processing is likely to
+        cause a detrimental effect on the child's well-being. Section 9(2) forbids that
+        outright and no exemption reaches it, so it is checked before anything else.
+        """
         current_time = now or datetime.now(timezone.utc)
         current_date = current_time.date()
 
-        # Adults (> 18) are outside Section 9 child constraints
+        # A person who has completed eighteen years is not a child (Section 2(f)).
         if not is_child(child_dob, current_date):
             return True
 
-        # Check Fourth Schedule / Rule 12 statutory exemptions
+        # Section 9(2): never waived, not by consent and not by Rule 12.
+        if detrimental_effect:
+            raise ChildProcessingViolation(
+                "DPDPA Section 9(2) violation: processing likely to cause a detrimental effect "
+                "on the well-being of a child is prohibited; no exemption or consent applies."
+            )
+
+        # Rule 12 / Fourth Schedule: the class-plus-condition exemptions configured for this fiduciary
         if self.is_exempt(purpose_key):
-            # Exempt purposes (e.g. educational safety tracking, medical clinical care) are permitted
             return True
 
         # Check Section 9(3) statutory prohibitions

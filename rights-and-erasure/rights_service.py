@@ -101,7 +101,7 @@ class InMemoryInventory:
     systems: dict = field(default_factory=dict)        # system_id -> {"system_name", "purposes", "data": {pid: [...]}}
     sharing: dict = field(default_factory=dict)        # pid -> [{"name", "role", "fields": [...]}]
     holds: dict = field(default_factory=dict)          # pid -> {system_id, ...}
-    nominations: dict = field(default_factory=dict)    # pid -> nominee dict
+    nominations: dict = field(default_factory=dict)    # pid -> [nominee dict, ...] (Rule 14(4): one or more)
     annotations: dict = field(default_factory=dict)    # system_id -> {pid: [{"correction", "annotated_at"}]}
 
     def systems_for(self, principal_id):
@@ -157,11 +157,17 @@ class InMemoryInventory:
         return {"system_id": system_id, "fields_annotated": len(matched), "updated_field_names": matched}
 
     def record_nomination(self, principal_id, nominee):
-        self.nominations[principal_id] = nominee
+        # Rule 14(4): "one or more individuals"; keep every nomination.
+        self.nominations.setdefault(principal_id, []).append(nominee)
         return nominee
 
     def get_nomination(self, principal_id):
-        return self.nominations.get(principal_id)
+        """The most recent nomination, for callers that expect one; see get_nominations."""
+        nominees = self.nominations.get(principal_id) or []
+        return nominees[-1] if nominees else None
+
+    def get_nominations(self, principal_id):
+        return list(self.nominations.get(principal_id) or [])
 
 
 class DPDPARightsService:
@@ -255,7 +261,8 @@ class DPDPARightsService:
         Statutory Scope:
           - Section 12 obliges the Data Fiduciary itself to correct, complete, and update data.
             Notifying downstream entities is good engineering practice aligned with Section 8(3)'s
-            accuracy obligation upon disclosure to another fiduciary/processor.
+            completeness, accuracy and consistency obligation where data is disclosed to another
+            Data Fiduciary (8(3)(b)); processors are bound by contract under Section 8(2).
           - Legal holds (e.g. tax invoice preservation): Overwriting original tax documents
             can violate other statutory retention duties. For held systems, corrections are
             recorded as annotations/versions next to the original, while non-held systems
@@ -322,10 +329,13 @@ class DPDPARightsService:
         nominee: dict,
     ) -> dict:
         """
-        DPDPA: Section 14 -- Right of nomination in the event of death or incapacity
-        DPDP Rules, 2025: Rule 14 -- Readily available means of exercising rights
+        DPDPA: Section 14(1) -- a Data Principal may nominate any other individual to
+        exercise her rights in the event of death or incapacity ("incapacity" per 14(2))
+        DPDP Rules, 2025: Rule 14(4) -- she may nominate "one or more individuals", using the
+        means and furnishing the particulars the Data Fiduciary requires
 
-        Note: Personal data of the nominee is never written into the audit log.
+        Each call adds a nominee; nominations are kept as a list, so a principal may name more
+        than one. Personal data of the nominee is never written into the audit log.
         A random UUID nomination reference token is generated, stored next to the record,
         and logged in the audit trail, preventing rainbow table / dictionary reversals.
         """

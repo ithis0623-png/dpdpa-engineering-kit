@@ -273,12 +273,17 @@ async def withdraw_consent(
             "WITHDRAW",
             {"withdrawn_at": withdrawn_at.isoformat(), "reason": "principal_withdrawal"},
         )
+        # Section 6(6): on withdrawal the fiduciary must, within a reasonable time, cease and
+        # cause its processors to cease processing, unless processing without consent is
+        # required or authorised by law. Erasure (Section 8(7)) has its own carve-out for
+        # retention required by law, so this fan-out instructs processors to stop, and the
+        # erasure decision stays with the retention and legal-hold logic.
         for proc in processors:
             await db.record_processor_fanout(consent_id, proc)
             await db.append_audit_event(
                 consent_id,
-                "ERASURE_FANOUT",
-                {"processor_id": proc, "triggered_by": "WITHDRAW"},
+                "CEASE_PROCESSING_FANOUT",
+                {"processor_id": proc, "triggered_by": "WITHDRAW", "basis": "S.6(6)"},
             )
 
     return ConsentWithdrawResponse(
@@ -296,11 +301,12 @@ async def withdraw_consent_parity(
     db: ConsentStore = Depends(get_store),
     settings: Settings = Depends(get_settings),
 ) -> ConsentWithdrawResponse:
-    """Withdrawal parity endpoint implementing DPDPA Section 6(4).
+    """One-call withdrawal of every active consent for a principal and purpose.
 
-    Withdraws all active consent records for a given principal and purpose with the
-    same simplicity as granting consent, executing all withdrawals within one atomic
-    transaction with row locks.
+    Section 6(4) requires that withdrawing consent be as easy as giving it. An endpoint
+    cannot satisfy that on its own (the user journey has to match the grant path), but it
+    removes the server-side reason for a harder withdrawal: all records are withdrawn in one
+    atomic transaction with row locks.
     """
     withdrawn_at = datetime.now(timezone.utc)
     processors = getattr(settings, "processors", [])
@@ -323,8 +329,8 @@ async def withdraw_consent_parity(
                 await db.record_processor_fanout(cid, proc)
                 await db.append_audit_event(
                     cid,
-                    "ERASURE_FANOUT",
-                    {"processor_id": proc, "triggered_by": "WITHDRAW"},
+                    "CEASE_PROCESSING_FANOUT",
+                    {"processor_id": proc, "triggered_by": "WITHDRAW", "basis": "S.6(6)"},
                 )
             withdrawn_ids.append(cid)
 

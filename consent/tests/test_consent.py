@@ -187,7 +187,13 @@ class TestWithdrawEndpoint:
         ]
         assert len(store.processor_fanouts) == 2
         events = [e["event_type"] for e in store.audit_events]
-        assert events == ["NOTICE_SHOWN", "GRANT", "WITHDRAW", "ERASURE_FANOUT", "ERASURE_FANOUT"]
+        assert events == [
+            "NOTICE_SHOWN",
+            "GRANT",
+            "WITHDRAW",
+            "CEASE_PROCESSING_FANOUT",
+            "CEASE_PROCESSING_FANOUT",
+        ]
         assert verify_chain(store.audit_events) is None
 
     def test_withdraw_parity_endpoint(self, api):

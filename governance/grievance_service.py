@@ -5,15 +5,18 @@ Implements the statutory Grievance Redressal Mechanism required by DPDPA Section
 and DPDP Rules, 2025 Rule 14.
 
 Statutory Obligations & Scope:
-  - Section 13(1) & Rule 14(1): Data Fiduciaries and Consent Managers must provide
-    readily available means of grievance redressal to Data Principals.
-  - Section 13(2) & Rule 14(3): The fiduciary must respond within the period it publishes,
-    which must not exceed ninety (90) days. Any shorter target (e.g., 30 days) operates
-    as an internal operational SLA within that statutory ceiling.
-  - Section 13(3): Exhaustion requirement. The Data Principal must first exhaust the
-    fiduciary's grievance redressal mechanism before approaching the Data Protection
-    Board of India (DPBI). Resolution and response notices must inform the principal
-    of this conditional right of complaint under Section 13(3).
+  - Section 8(10) & 13(1): a Data Fiduciary (and a Consent Manager) must establish an
+    effective grievance redressal mechanism, and a Data Principal has the right to readily
+    available means of grievance redressal.
+  - Section 13(2) & Rule 14(3): the fiduciary must respond within the period it publishes
+    on its website or app, which must not exceed ninety (90) days, and must put in place
+    the technical and organisational measures to meet it. Any shorter target (e.g. 30 days)
+    is an internal SLA within that ceiling. This service tracks the period; publishing it
+    is the fiduciary's own step.
+  - Section 13(3): the Data Principal must exhaust this mechanism before approaching the
+    Data Protection Board of India. Telling the principal how to complain to the Board is a
+    duty of the consent notice (Section 5(1)(iii), Rule 3(c)(iii)); repeating it in a
+    resolution notice, as this service does, is good practice, not a Section 13 requirement.
   - Escalation: While Significant Data Fiduciaries (SDFs) must appoint a Data Protection
     Officer (DPO) under Section 10(2)(a), other fiduciaries designate an internal Grievance
     Officer or privacy lead. Escalation supports configurable owners.
@@ -116,7 +119,8 @@ class DPDPAGrievanceService:
     ) -> GrievanceTicket:
         """Registers a grievance from a Data Principal.
 
-        Note: Rule 14(1) requires a readily accessible grievance redressal mechanism.
+        Note: Section 8(10) requires an effective grievance redressal mechanism and
+        Section 13(1) gives the principal readily available means to use it.
         Internal SLA defaults to 30 days, within Rule 14(3)'s 90-day ceiling.
         """
         if not description.strip():
@@ -203,7 +207,9 @@ class DPDPAGrievanceService:
         resolution_summary: str,
         resolved_at: datetime | None = None,
     ) -> GrievanceTicket:
-        """Resolves a grievance, attaching the resolution and Section 13(3) advisory."""
+        """Resolves a grievance, attaching the resolution and the Board-complaint advisory
+        (good practice; the statutory duty to explain the route to the Board sits in the
+        Section 5 notice)."""
         if not resolution_summary.strip():
             raise ValueError("Resolution summary cannot be empty")
 
