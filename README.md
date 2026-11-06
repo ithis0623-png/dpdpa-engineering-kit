@@ -3,6 +3,8 @@
 [![CI Status](https://github.com/statecheck-security/dpdpa-engineering-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/statecheck-security/dpdpa-engineering-kit/actions)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
+[![Release](https://img.shields.io/github/v/release/statecheck-security/dpdpa-engineering-kit?style=flat)](https://github.com/statecheck-security/dpdpa-engineering-kit/releases)
+[![Stars](https://img.shields.io/github/stars/statecheck-security/dpdpa-engineering-kit?style=flat&logo=github)](https://github.com/statecheck-security/dpdpa-engineering-kit/stargazers)
 
 Tested code for India's Digital Personal Data Protection Act, 2023 and the DPDP Rules, 2025:
 consent records, breach detection, encryption, data residency, CI/CD privacy gates and
@@ -72,6 +74,12 @@ Copy what you need. Each folder's README says what to replace (keys, role ARNs, 
 your data inventory) before the code is safe to run against real data. The Python modules
 keep their collaborators (stores, KMS clients, queues) behind small interfaces with in-memory
 versions for tests, so you can plug in your own.
+
+## Related tools
+
+- **[dpdp-scan](https://github.com/statecheck-security/dpdp-scan)**: the scanner that grew out of this kit's `ci-cd/` gate. It finds Indian identifiers in code, fixtures and logs with real checksums, reads SQL, Prisma and OpenAPI schemas into a data inventory, and ships the Semgrep rules this kit's three started as. Run it in CI; the Action puts findings in the Security tab.
+- **[dvdpa](https://github.com/statecheck-security/dvdpa)**: a deliberately leaky demo app to point dpdp-scan at.
+- **[paranoid](https://github.com/theAstiv/paranoid)**: self-hosted STRIDE + MAESTRO threat modelling with LLMs; the LINDDUN mitigations in `threat-modeling/` pair with it.
 
 ## Licence
 

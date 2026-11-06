@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this kit in research or a report, please cite it as below."
+title: "DPDPA Engineering Kit"
+type: software
+authors:
+  - name: "StateCheck Security"
+    website: "https://statechecksecurity.com"
+version: "0.1.0"
+date-released: "2026-11-06"
+license: Apache-2.0
+repository-code: "https://github.com/statecheck-security/dpdpa-engineering-kit"
+url: "https://statechecksecurity.com/dpdpa"
+abstract: >-
+  Tested code patterns for India's Digital Personal Data Protection Act, 2023 and the
+  DPDP Rules, 2025: consent records and receipts, breach detection and notification,
+  field-level encryption, data residency, CI/CD privacy gates, threat-model mitigations and
+  control mappings to ISO 27001, SOC 2 and NIST. Engineering patterns, not legal advice.
+keywords:
+  - DPDP Act
+  - DPDPA
+  - India
+  - privacy engineering
+  - consent
+  - breach notification
+  - encryption
+  - policy as code

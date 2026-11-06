@@ -1,0 +1,29 @@
+DPDPA Engineering Kit
+Copyright 2026 StateCheck Security (https://statechecksecurity.com)
+
+This product includes software developed by StateCheck Security and by the
+contributors listed in the repository history.
+
+The code in each folder accompanies an article published by StateCheck
+Security, which explains the obligation behind it:
+
+  consent/              https://statechecksecurity.com/blog/dpdpa-consent-management-api
+  consent-manager/      https://statechecksecurity.com/blog/dpdpa-consent-manager-registration
+  breach-notification/  https://statechecksecurity.com/blog/dpdpa-breach-notification-automation
+                        https://statechecksecurity.com/dpdpa/breach-runbook
+  encryption/           https://statechecksecurity.com/blog/dpdpa-encryption-requirements
+  cross-border/         https://statechecksecurity.com/blog/dpdpa-cross-border-data-transfer
+  ci-cd/                https://statechecksecurity.com/blog/dpdpa-privacy-by-design-cicd
+  threat-modeling/      https://statechecksecurity.com/blog/dpdpa-threat-modeling-linddun-stride
+  zero-trust/           https://statechecksecurity.com/blog/dpdpa-zero-trust-architecture
+  mappings/             https://statechecksecurity.com/blog/dpdpa-iso-27001-mapping
+                        https://statechecksecurity.com/blog/nist-privacy-framework-dpdpa
+                        https://statechecksecurity.com/blog/soc-2-dpdpa-compliance
+
+The mappings in mappings/ are licensed under CC BY 4.0 (see mappings/LICENSE);
+everything else under the Apache License, Version 2.0 (see LICENSE). When you
+redistribute the kit or a derivative, keep this NOTICE file with it.
+
+The legal references in this software (sections of the Digital Personal Data
+Protection Act, 2023 and rules of the Digital Personal Data Protection Rules,
+2025) are pointers for engineers. They are not legal advice.
