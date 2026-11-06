@@ -97,10 +97,10 @@ class DPDPAGrievanceService:
         audit: AuditSink | None = None,
         sla_days: int = DEFAULT_INTERNAL_SLA_DAYS,
     ):
-        if sla_days > STATUTORY_CEILING_DAYS:
+        if not (1 <= sla_days <= STATUTORY_CEILING_DAYS):
             raise ValueError(
-                f"SLA of {sla_days} days exceeds the Rule 14(3) statutory ceiling "
-                f"of {STATUTORY_CEILING_DAYS} days."
+                f"SLA of {sla_days} days is invalid; must be between 1 and "
+                f"the Rule 14(3) statutory ceiling of {STATUTORY_CEILING_DAYS} days."
             )
         self.audit = audit or InMemoryAuditSink()
         self.sla_days = sla_days

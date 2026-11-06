@@ -1,8 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
-from governance.grievance_service import (
+from grievance_service import (
     DPBI_COMPLAINT_ADVISORY,
     DPDPAGrievanceService,
     GrievanceCategory,
@@ -20,9 +19,10 @@ class TestGrievanceServiceInitialization:
         service_max = DPDPAGrievanceService(sla_days=90)
         assert service_max.sla_days == 90
 
-    def test_sla_exceeding_90_day_ceiling_rejected(self):
-        with pytest.raises(ValueError, match="exceeds the Rule 14\\(3\\) statutory ceiling"):
-            DPDPAGrievanceService(sla_days=91)
+    @pytest.mark.parametrize("invalid_days", [-10, 0, 91, 120])
+    def test_sla_invalid_range_rejected(self, invalid_days):
+        with pytest.raises(ValueError, match="is invalid; must be between 1 and"):
+            DPDPAGrievanceService(sla_days=invalid_days)
 
 
 class TestGrievanceRegistrationAndLifecycle:
