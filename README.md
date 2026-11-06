@@ -1,5 +1,9 @@
 # DPDPA Engineering Kit
 
+[![CI Status](https://github.com/statecheck-security/dpdpa-engineering-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/statecheck-security/dpdpa-engineering-kit/actions)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python Version](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
+
 Tested code for India's Digital Personal Data Protection Act, 2023 and the DPDP Rules, 2025:
 consent records, breach detection, encryption, data residency, CI/CD privacy gates and
 control mappings. Each folder comes from one of
