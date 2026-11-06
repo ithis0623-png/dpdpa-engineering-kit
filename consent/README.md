@@ -15,6 +15,12 @@ and [SOC 2 and DPDPA](https://statechecksecurity.com/blog/soc-2-dpdpa-compliance
 | `soc2-consent-audit-log.sql` | A simpler append-only consent log (SOC 2 P2.1 extension) enforced with role grants |
 | `erd.mmd`, `lifecycle.mmd` | Entity and sequence diagrams |
 
+### Child Data Protection (Statutory Extension)
+
+| File | What it is |
+|---|---|
+| `parental_consent.py` | Implements Section 9 & Rule 10 verifiable parental consent, `ParentVerifier` interface, Fourth Schedule & Rule 12 statutory exemptions, multi-consent support, and consent withdrawal |
+
 ## Before you use it
 
 - **Keys.** `Settings.signing_key` (Ed25519) and `pseudonym_key` (HMAC) belong in a KMS or
