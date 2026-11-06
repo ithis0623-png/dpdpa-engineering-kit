@@ -7,7 +7,7 @@ From [Consent Manager registration under the DPDP Rules](https://statechecksecur
 
 | File | What it is |
 |---|---|
-| `consent_router.py` | Forwards encrypted consent tokens and payloads between fiduciaries, storing only their SHA-256 hashes (First Schedule, Part B, Item 2) |
+| `consent_router.py` | Routes encrypted consent grant, withdrawal, and data-sharing tokens between fiduciaries, storing only their SHA-256 hashes (First Schedule, Part B, Item 2) |
 | `ledger.sql` | PostgreSQL consent event store; triggers refuse `UPDATE`, `DELETE` and `TRUNCATE` |
 | `export-schema.yaml` | Example machine-readable export of a Data Principal's consent records |
 | `architecture.mmd` | Zero-knowledge architecture diagram |

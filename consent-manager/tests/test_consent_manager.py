@@ -55,6 +55,20 @@ def test_grant_stores_only_a_hash_and_forwards_the_token_unchanged():
     assert token.hex() not in _stored_values(record)
 
 
+def test_withdraw_stores_only_a_hash_and_forwards_the_token_unchanged():
+    store, gateway = RecordingStore(), RecordingGateway()
+    token = _encrypt(b'{"purpose": "marketing", "action": "WITHDRAW"}')
+
+    record = ConsentManagerRouter(store, gateway).route_consent_withdraw("p-1", "fid-abc", "marketing", token)
+
+    assert isinstance(record, ConsentRecord)
+    assert record.action == "WITHDRAW"
+    assert record.consent_token_hash == sha256(token).hexdigest()
+    assert store.records == [record]
+    assert gateway.forwarded == [("fid-abc", token)]
+    assert token.hex() not in _stored_values(record)
+
+
 def test_data_share_records_metadata_and_routes_ciphertext_to_target():
     store, gateway = RecordingStore(), RecordingGateway()
     payload = _encrypt(b"bank statement for p-1")

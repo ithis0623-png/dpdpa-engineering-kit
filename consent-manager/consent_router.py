@@ -75,6 +75,31 @@ class ConsentManagerRouter:
         )
         return record
 
+    def route_consent_withdraw(
+        self,
+        principal_id: str,
+        fiduciary_id: str,
+        purpose_id: str,
+        encrypted_withdrawal_token: bytes,
+    ) -> ConsentRecord:
+        """Routes a consent withdrawal from Data Principal to Data Fiduciary
+        without accessing personal data, per DPDPA Section 6(7)."""
+        record = ConsentRecord(
+            principal_id=principal_id,
+            fiduciary_id=fiduciary_id,
+            purpose_id=purpose_id,
+            action="WITHDRAW",
+            timestamp=datetime.now(timezone.utc),
+            consent_token_hash=sha256(encrypted_withdrawal_token).hexdigest(),
+        )
+        self.consent_store.persist(record)
+
+        self.fiduciary_gateway.forward(
+            fiduciary_id=fiduciary_id,
+            encrypted_token=encrypted_withdrawal_token,
+        )
+        return record
+
     def route_data_share(
         self,
         principal_id: str,
