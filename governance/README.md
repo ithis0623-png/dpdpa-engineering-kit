@@ -20,6 +20,12 @@ From [5-step DPDPA implementation roadmap](https://statechecksecurity.com/blog/5
 | `audit-log-entry.json` | Audit log record format (Rule 6(1)(c)) |
 | `withdrawal-parity.txt` | Withdrawal takes the same steps as consent (Section 6(4)) |
 
+### Grievance Redressal Service (Statutory Extension)
+
+| File | What it is |
+|---|---|
+| `grievance_service.py` | Implements Section 13 & Rule 14 grievance lifecycle, configurable escalation (Grievance Officer / DPO), SLA monitoring within Rule 14(3) 90-day ceiling, and Section 13(3) DPBI complaint advisory |
+
 ## Before you use it
 
 `governance_config.py` is set up for a Significant Data Fiduciary. If you are not notified as
