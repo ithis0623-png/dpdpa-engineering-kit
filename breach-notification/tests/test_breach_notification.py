@@ -113,6 +113,39 @@ def test_principal_intimation_rule_7_1(contact):
     assert "phishing" in d["consequences_for_principal"]
     assert d["compromised_categories"] == ["contact"]
     assert d["contact"]["name"] == "Ananya Roy"
+    assert d["delivery_channel"] == "user_account"
+
+
+def test_principal_intimation_custom_delivery_channel(contact):
+    builder = BreachIntimationBuilder(contact)
+    notice = builder.build_principal_intimation(
+        principal_id="dp-9988",
+        nature="leak",
+        extent="one table",
+        timing="2026-11-01",
+        location="db-1",
+        consequences_for_principal="test",
+        compromised_categories=[DataCategory.CONTACT],
+        mitigation_measures=["patched"],
+        recommended_safety_steps=["change password"],
+        delivery_channel="registered_email",
+    )
+    assert notice.delivery_channel == "registered_email"
+    assert notice.to_dict()["delivery_channel"] == "registered_email"
+
+    with pytest.raises(ValueError, match="delivery_channel is required"):
+        builder.build_principal_intimation(
+            principal_id="dp-9988",
+            nature="leak",
+            extent="one table",
+            timing="2026-11-01",
+            location="db-1",
+            consequences_for_principal="test",
+            compromised_categories=[DataCategory.CONTACT],
+            mitigation_measures=["patched"],
+            recommended_safety_steps=["change password"],
+            delivery_channel="   ",
+        )
 
 
 def test_principal_intimation_validation_errors(contact):
@@ -160,6 +193,20 @@ def test_board_first_intimation_rule_7_2_a_without_mandatory_mitigation(contact)
     assert data["extent_affected_principals"] == 1200
     assert "detected_at" in data["timing"]
     assert data["immediate_mitigation"] == []
+    assert data["became_aware_at"] is None
+
+    # Verify explicit became_aware_at sharing common clock
+    aware_ts = datetime(2026, 11, 1, 10, 0, tzinfo=timezone.utc)
+    first_notice_with_aware = builder.build_board_first_intimation(
+        incident_id="INC-2026-102",
+        nature="API leakage",
+        extent_affected_principals=50,
+        location="ap-south-1",
+        likely_impact="Low",
+        became_aware_at=aware_ts,
+    )
+    assert first_notice_with_aware.became_aware_at == aware_ts
+    assert first_notice_with_aware.to_dict()["became_aware_at"] == aware_ts.isoformat()
 
 
 def test_board_detailed_report_rule_7_2_b_and_72h_clock(contact):

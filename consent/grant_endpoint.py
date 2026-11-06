@@ -109,10 +109,6 @@ class InMemoryConsentStore:
             return {"consent_id": consent_id, **rec}
         return None
 
-    # Backward compatibility alias
-    async def fetch_consent_record(self, consent_id: uuid.UUID) -> dict | None:
-        return await self.fetch_consent_record_for_update(consent_id)
-
     async def fetch_active_consents_for_update(
         self, principal_id: uuid.UUID, purpose_id: uuid.UUID
     ) -> list[dict]:
@@ -125,11 +121,6 @@ class InMemoryConsentStore:
             ):
                 matches.append({"consent_id": cid, **rec})
         return matches
-
-    # Backward compatibility alias
-    async def fetch_active_consent(self, principal_id: uuid.UUID, purpose_id: uuid.UUID) -> dict | None:
-        consents = await self.fetch_active_consents_for_update(principal_id, purpose_id)
-        return consents[0] if consents else None
 
     async def withdraw_consent_record(self, consent_id: uuid.UUID, withdrawn_at: datetime) -> None:
         if consent_id in self.consent_records:

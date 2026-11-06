@@ -18,9 +18,11 @@ From [DPDPA encryption requirements](https://statechecksecurity.com/blog/dpdpa-e
 
 ## Before you use it
 
-- **KMS client.** `DPDPAFieldEncryptor` expects `kms.encrypt(key_id, plaintext, encryption_context)`
+- **KMS client & AWS exceptions.** `DPDPAFieldEncryptor` expects `kms.encrypt(key_id, plaintext, encryption_context)`
   and `kms.decrypt(...)`. Wrap boto3 (`KeyId=`, `Plaintext=`, `EncryptionContext=`) or your
-  provider's SDK.
+  provider's SDK. Note: Real AWS KMS raises `botocore.exceptions.ClientError` with code
+  `InvalidCiphertextException` on context mismatches. Pass `context_mismatch_exception=botocore.exceptions.ClientError`
+  (or a wrapper subclass) into `DPDPAFieldEncryptor` when integrating with boto3.
 - **Encryption context & pseudonyms.** Pass `pseudonym_key` (bytes) to `DPDPAFieldEncryptor` to
   HMAC the Data Principal ID into a pseudonym before sending it in the KMS encryption context,
   preventing cleartext personal data from appearing in CloudTrail audit logs.

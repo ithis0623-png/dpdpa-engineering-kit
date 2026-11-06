@@ -60,6 +60,7 @@ class PrincipalIntimation:
     contact: dict                         # Rule 7(1)(e)
     language_code: str
     sent_at: str
+    delivery_channel: str = "user_account"  # Rule 7(1): user account or registered contact method
 
     def to_dict(self) -> dict:
         return {
@@ -76,6 +77,7 @@ class PrincipalIntimation:
             "contact": self.contact,
             "language_code": self.language_code,
             "sent_at": self.sent_at,
+            "delivery_channel": self.delivery_channel,
         }
 
 
@@ -101,6 +103,7 @@ class BoardFirstIntimation:
     likely_impact: str
     contact: dict
     submitted_at: str
+    became_aware_at: datetime | None = None
     immediate_mitigation: list[str] = field(default_factory=list)  # Optional supplementary context
 
     def to_dict(self) -> dict:
@@ -115,6 +118,7 @@ class BoardFirstIntimation:
             "immediate_mitigation": self.immediate_mitigation,
             "contact": self.contact,
             "submitted_at": self.submitted_at,
+            "became_aware_at": self.became_aware_at.isoformat() if self.became_aware_at else None,
         }
 
 
@@ -208,6 +212,7 @@ class BreachIntimationBuilder:
         mitigation_measures: list[str],
         recommended_safety_steps: list[str],
         language_code: str = "en",
+        delivery_channel: str = "user_account",
     ) -> PrincipalIntimation:
         """Constructs an intimation to an affected Data Principal under Rule 7(1)."""
         if not compromised_categories:
@@ -218,6 +223,8 @@ class BreachIntimationBuilder:
             raise ValueError("Extent of the breach is required (Rule 7(1)(a))")
         if not timing.strip() or not location.strip():
             raise ValueError("Timing and location of the breach are required (Rule 7(1)(a))")
+        if not delivery_channel.strip():
+            raise ValueError("delivery_channel is required per Rule 7(1) (e.g. user_account, email, sms)")
 
         cats = [c.value if isinstance(c, DataCategory) else str(c) for c in compromised_categories]
 
@@ -235,6 +242,7 @@ class BreachIntimationBuilder:
             contact=self._contact_dict(),
             language_code=language_code,
             sent_at=datetime.now(timezone.utc).isoformat(),
+            delivery_channel=delivery_channel,
         )
 
     def build_board_first_intimation(
@@ -247,6 +255,7 @@ class BreachIntimationBuilder:
         immediate_mitigation: list[str] | None = None,
         detected_at: datetime | None = None,
         occurred_at: datetime | None = None,
+        became_aware_at: datetime | None = None,
     ) -> BoardFirstIntimation:
         """Constructs the initial intimation to the Board under Rule 7(2)(a)."""
         if extent_affected_principals < 0:
@@ -269,6 +278,7 @@ class BreachIntimationBuilder:
             immediate_mitigation=immediate_mitigation or [],
             contact=self._contact_dict(),
             submitted_at=now.isoformat(),
+            became_aware_at=became_aware_at,
         )
 
     def build_board_detailed_report(
