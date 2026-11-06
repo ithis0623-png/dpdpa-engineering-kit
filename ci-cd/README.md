@@ -16,6 +16,8 @@ From [Privacy by design in CI/CD](https://statechecksecurity.com/blog/dpdpa-priv
 
 Gate 2 also uses `../encryption/policies/encryption.rego`.
 
+**The Semgrep rules and `config/pii-fields.yaml` are kept here as the article's companion.** The versions that grow are in [dpdp-scan](https://github.com/statecheck-security/dpdp-scan): its rule pack adds JS/TS variants, personal data sent to analytics SDKs and date-of-birth collection without an age gate, and its field-name lexicon covers the Indian abbreviations and misspellings this list does not. For a new project, run dpdp-scan as Gate 1 instead of copying these.
+
 ## Using it
 
 Copy the workflow to `.github/workflows/`, the Semgrep rules to `.semgrep/`, both Rego files

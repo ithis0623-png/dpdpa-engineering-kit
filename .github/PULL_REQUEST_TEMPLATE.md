@@ -24,3 +24,6 @@ Which DPDPA 2023 Section or DPDP Rules 2025 provision does this address?
 - [ ] `pytest -m "not docker and not network"` passes (all unit tests green).
 - [ ] Added unit tests covering the new behavior / bug fix.
 - [ ] Updated `CHANGES-FROM-ARTICLES.md` and/or module `README.md` if applicable.
+- [ ] No real identifier anywhere in the change: fixtures use UIDAI test UIDs or generated synthetic values (`dpdp-scan .` is clean or only reports synthetic values).
+- [ ] Every cited section or Rule is exact, and no text gives a compliance verdict.
+- [ ] Commits are signed off (`git commit -s`, Developer Certificate of Origin).
