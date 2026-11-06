@@ -110,10 +110,10 @@ def test_erasure_without_holds_is_completed(rights):
 
 
 def test_correction_updates_held_systems_and_notifies_downstream(rights):
-    """Section 12(1)-(2): Legal holds stop erasure, not correction.
+    """Section 12(1)-(2): Active systems are updated; held records are annotated.
 
-    A retention obligation is no reason to keep inaccurate data. Held systems
-    must still be updated, and downstream processors notified.
+    For systems under statutory preservation (e.g. tax records/invoices), historical
+    records are kept intact with corrections recorded alongside as annotations.
     """
     service, inventory, audit = rights
     corrections = {
@@ -126,24 +126,63 @@ def test_correction_updates_held_systems_and_notifies_downstream(rights):
 
     resp = service.handle_correction_request("dp-1", corrections)
     assert resp["status"] == "completed"
-    assert resp["systems_updated"] == 2
+    assert resp["fields_updated"] == 2
+    assert resp["systems_overwritten"] == ["crm"]
+    assert resp["systems_annotated"] == ["billing"]
     assert resp["downstream_entities_notified"] == 1
 
-    # Verify held system (billing) was indeed updated
-    billing_data = inventory.systems["billing"]["data"]["dp-1"][0]
-    assert billing_data["value"] == "29ABCDE9999F1Z9"
-
-    # Verify CRM was updated
+    # Verify CRM (non-held) was updated in place
     crm_data = inventory.systems["crm"]["data"]["dp-1"][0]
     assert crm_data["value"] == "asha.new@example.in"
 
-    # Downstream notification recorded
+    # Verify Billing (held) original preserved in place
+    billing_data = inventory.systems["billing"]["data"]["dp-1"][0]
+    assert billing_data["value"] == "29ABCDE1234F1Z5"  # original untouched
+
+    # Verify Billing annotation recorded next to original
+    assert len(inventory.annotations["billing"]["dp-1"]) == 1
+    assert inventory.annotations["billing"]["dp-1"][0]["correction"] == {"gstin": "29ABCDE9999F1Z9"}
+
+    # Downstream notification recorded without leaking raw field dicts
     assert len(service.notifier.notifications) == 1
     assert service.notifier.notifications[0]["entity"] == "ShipRocket"
+    assert service.notifier.notifications[0]["signal"] == "record_updated_refetch"
 
     # PII kept out of audit log
     assert "asha.new@example.in" not in repr(audit.events)
     assert "29ABCDE9999F1Z9" not in repr(audit.events)
+
+
+def test_correction_with_no_matching_fields_returns_rejected(rights):
+    service, _, _ = rights
+    corrections = {"crm": {"non_existent_field": "some_value"}}
+    resp = service.handle_correction_request("dp-1", corrections)
+    assert resp["status"] == "rejected"
+    assert resp["fields_updated"] == 0
+    assert resp["systems_overwritten"] == []
+    assert resp["systems_annotated"] == []
+
+
+def test_notifier_does_not_overshare_fields(rights):
+    service, inventory, _ = rights
+    # Configure granular shared fields
+    inventory.sharing["dp-1"] = [
+        {"name": "CourierCo", "role": "processor", "fields": ["shipping_address"]},
+        {"name": "SupportDesk", "role": "processor", "fields": ["email"]},
+    ]
+
+    corrections = {"crm": {"email": "asha.updated@example.in"}}
+    resp = service.handle_correction_request("dp-1", corrections)
+    assert resp["status"] == "completed"
+
+    # CourierCo was not given email, so CourierCo must NOT be notified
+    notified_entities = [n["entity"] for n in service.notifier.notifications]
+    assert "CourierCo" not in notified_entities
+    assert "SupportDesk" in notified_entities
+
+    # SupportDesk was notified ONLY for the field it holds
+    support_notification = next(n for n in service.notifier.notifications if n["entity"] == "SupportDesk")
+    assert support_notification["updated_fields"] == ["email"]
 
 
 def test_nomination_registration_and_retrieval(rights):
@@ -162,6 +201,7 @@ def test_nomination_registration_and_retrieval(rights):
     retrieved = service.get_nomination("dp-1")
     assert retrieved["name"] == "Priya Sharma"
     assert retrieved["relationship"] == "spouse"
+    assert retrieved["nominee_ref"] == resp["nominee_ref"]
 
     # Audit log keeps personal data out of logs
     assert "Priya Sharma" not in repr(audit.events)

@@ -16,8 +16,8 @@ From [NIST Privacy Framework and DPDPA](https://statechecksecurity.com/blog/nist
 
 | Feature | Statutory Basis | Description |
 |---|---|---|
-| Correction & Updating | Section 12(1)–(2) | Updates personal data across all affected systems (including held systems, as retention obligations do not justify retaining inaccurate data) and notifies downstream entities |
-| Nomination | Section 14, Rule 14 | Registers and retrieves nomination for death or incapacity, recording privacy-preserving reference tokens in audit logs |
+| Correction & Updating | Section 12(1)–(2) | Updates personal data in place for standard systems and records annotations next to original records for systems under statutory preservation (e.g. tax invoices). Notifies relevant downstream entities per good practice and Section 8(3) accuracy principles |
+| Nomination | Section 14, Rule 14 | Registers and retrieves nomination for death or incapacity, recording random unguessable reference tokens in audit logs |
 
 ## Before you use it
 
