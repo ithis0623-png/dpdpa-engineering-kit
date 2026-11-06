@@ -107,3 +107,113 @@ def test_erasure_without_holds_is_completed(rights):
     service, inventory, _ = rights
     inventory.holds.clear()
     assert service.handle_erasure_request("dp-1", "consent_withdrawal")["status"] == "completed"
+
+
+def test_correction_updates_held_systems_and_notifies_downstream(rights):
+    """Section 12(1)-(2): Active systems are updated; held records are annotated.
+
+    For systems under statutory preservation (e.g. tax records/invoices), historical
+    records are kept intact with corrections recorded alongside as annotations.
+    """
+    service, inventory, audit = rights
+    corrections = {
+        "crm": {"email": "asha.new@example.in"},
+        "billing": {"gstin": "29ABCDE9999F1Z9"},
+    }
+
+    # "billing" is held under legal retention in fixture
+    assert "billing" in inventory.legal_holds("dp-1")
+
+    resp = service.handle_correction_request("dp-1", corrections)
+    assert resp["status"] == "completed"
+    assert resp["fields_updated"] == 2
+    assert resp["systems_overwritten"] == ["crm"]
+    assert resp["systems_annotated"] == ["billing"]
+    assert resp["downstream_entities_notified"] == 1
+
+    # Verify CRM (non-held) was updated in place
+    crm_data = inventory.systems["crm"]["data"]["dp-1"][0]
+    assert crm_data["value"] == "asha.new@example.in"
+
+    # Verify Billing (held) original preserved in place
+    billing_data = inventory.systems["billing"]["data"]["dp-1"][0]
+    assert billing_data["value"] == "29ABCDE1234F1Z5"  # original untouched
+
+    # Verify Billing annotation recorded next to original
+    assert len(inventory.annotations["billing"]["dp-1"]) == 1
+    assert inventory.annotations["billing"]["dp-1"][0]["correction"] == {"gstin": "29ABCDE9999F1Z9"}
+
+    # Downstream notification recorded without leaking raw field dicts
+    assert len(service.notifier.notifications) == 1
+    assert service.notifier.notifications[0]["entity"] == "ShipRocket"
+    assert service.notifier.notifications[0]["signal"] == "record_updated_refetch"
+
+    # PII kept out of audit log
+    assert "asha.new@example.in" not in repr(audit.events)
+    assert "29ABCDE9999F1Z9" not in repr(audit.events)
+
+
+def test_correction_with_no_matching_fields_returns_rejected(rights):
+    service, _, _ = rights
+    corrections = {"crm": {"non_existent_field": "some_value"}}
+    resp = service.handle_correction_request("dp-1", corrections)
+    assert resp["status"] == "rejected"
+    assert resp["fields_updated"] == 0
+    assert resp["systems_overwritten"] == []
+    assert resp["systems_annotated"] == []
+
+
+def test_notifier_does_not_overshare_fields(rights):
+    service, inventory, _ = rights
+    # Configure granular shared fields
+    inventory.sharing["dp-1"] = [
+        {"name": "CourierCo", "role": "processor", "fields": ["shipping_address"]},
+        {"name": "SupportDesk", "role": "processor", "fields": ["email"]},
+    ]
+
+    corrections = {"crm": {"email": "asha.updated@example.in"}}
+    resp = service.handle_correction_request("dp-1", corrections)
+    assert resp["status"] == "completed"
+
+    # CourierCo was not given email, so CourierCo must NOT be notified
+    notified_entities = [n["entity"] for n in service.notifier.notifications]
+    assert "CourierCo" not in notified_entities
+    assert "SupportDesk" in notified_entities
+
+    # SupportDesk was notified ONLY for the field it holds
+    support_notification = next(n for n in service.notifier.notifications if n["entity"] == "SupportDesk")
+    assert support_notification["updated_fields"] == ["email"]
+
+
+def test_nomination_registration_and_retrieval(rights):
+    """Section 14 & Rule 14: Nomination in event of death/incapacity."""
+    service, _, audit = rights
+    nominee = {
+        "name": "Priya Sharma",
+        "relationship": "spouse",
+        "contact": "priya@example.in",
+    }
+
+    resp = service.handle_nomination_request("dp-1", nominee)
+    assert resp["status"] == "completed"
+    assert resp["nominee_ref"].startswith("nom-")
+
+    retrieved = service.get_nomination("dp-1")
+    assert retrieved["name"] == "Priya Sharma"
+    assert retrieved["relationship"] == "spouse"
+    assert retrieved["nominee_ref"] == resp["nominee_ref"]
+
+    # Audit log keeps personal data out of logs
+    assert "Priya Sharma" not in repr(audit.events)
+    assert "priya@example.in" not in repr(audit.events)
+    nom_event = [e for e in audit.events if e.get("event") == "nomination_registered"][0]
+    assert nom_event["nominee_ref"] == resp["nominee_ref"]
+    assert nom_event["relationship"] == "spouse"
+
+
+def test_nomination_rejected_without_name(rights):
+    service, _, _ = rights
+    resp = service.handle_nomination_request("dp-1", {"relationship": "child"})
+    assert resp["status"] == "rejected"
+    assert resp["reason"] == "invalid_nominee_details"
+
