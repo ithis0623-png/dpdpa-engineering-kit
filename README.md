@@ -3,7 +3,6 @@
 [![CI Status](https://github.com/statecheck-security/dpdpa-engineering-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/statecheck-security/dpdpa-engineering-kit/actions)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
-[![Compliance](https://img.shields.io/badge/DPDPA-2023%20%7C%20DPDP%20Rules%202025-emerald.svg)](https://www.meity.gov.in/)
 
 Tested code for India's Digital Personal Data Protection Act, 2023 and the DPDP Rules, 2025:
 consent records, breach detection, encryption, data residency, CI/CD privacy gates and
