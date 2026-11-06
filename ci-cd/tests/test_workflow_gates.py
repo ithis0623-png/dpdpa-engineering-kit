@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import find_bash
+from bash_helper import find_bash
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = yaml.safe_load((ROOT / "github" / "dpdpa-privacy-checks.yml").read_text(encoding="utf-8"))
