@@ -203,6 +203,56 @@ class TestWithdrawEndpoint:
         assert withdraw_resp.status_code == 200
         assert withdraw_resp.json()["consent_id"] == consent_id
         assert withdraw_resp.json()["status"] == "withdrawn"
+        assert withdraw_resp.json()["withdrawn_consent_ids"] == [consent_id]
+
+    def test_withdraw_parity_withdraws_all_active_grants_for_purpose(self, api):
+        client, store, notice, body = api
+        # 1. First grant on initial notice
+        grant_1 = client.post("/v1/consents", json=body)
+        assert grant_1.status_code == 201
+        cid_1 = grant_1.json()["consent_id"]
+
+        # 2. Revised notice for the same purpose
+        nv2_id = uuid.uuid4()
+        notice_v2 = NoticeVersion(notice_version_id=nv2_id, purpose_id=notice.purpose_id)
+        store.notices[nv2_id] = notice_v2
+        content_v2 = b"Updated notice text in Hindi"
+        store.translations[(nv2_id, "hi")] = NoticeTranslation(
+            notice_version_id=nv2_id,
+            language_code="hi",
+            content_hash=sha256(content_v2).digest(),
+        )
+
+        body_v2 = dict(body)
+        body_v2["notice_version_id"] = str(nv2_id)
+        body_v2["content_hash_shown"] = sha256(content_v2).hexdigest()
+
+        grant_2 = client.post("/v1/consents", json=body_v2)
+        assert grant_2.status_code == 201
+        cid_2 = grant_2.json()["consent_id"]
+
+        # Both records are currently active ("granted")
+        assert store.consent_records[uuid.UUID(cid_1)]["status"] == "granted"
+        assert store.consent_records[uuid.UUID(cid_2)]["status"] == "granted"
+
+        # 3. Withdraw via parity endpoint for this principal + purpose
+        withdraw_body = {
+            "principal_id": body["principal_id"],
+            "purpose_id": str(notice.purpose_id),
+        }
+        resp = client.post("/v1/consents/withdraw", json=withdraw_body)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert set(data["withdrawn_consent_ids"]) == {cid_1, cid_2}
+
+        # Both records are now withdrawn
+        assert store.consent_records[uuid.UUID(cid_1)]["status"] == "withdrawn"
+        assert store.consent_records[uuid.UUID(cid_2)]["status"] == "withdrawn"
+
+        # Subsequent withdrawal returns 404 because all active grants are withdrawn
+        again = client.post("/v1/consents/withdraw", json=withdraw_body)
+        assert again.status_code == 404
+        assert again.json()["detail"] == "active_consent_not_found"
 
     def test_withdraw_already_withdrawn_returns_409(self, api):
         client, _, _, body = api

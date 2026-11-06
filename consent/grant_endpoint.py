@@ -45,6 +45,7 @@ class ConsentWithdrawResponse(BaseModel):
     status: str
     withdrawn_at: datetime
     processors_notified: list[str] = Field(default_factory=list)
+    withdrawn_consent_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 @dataclass
@@ -69,8 +70,18 @@ class ConsentStore(Protocol):
     def transaction(self): ...
     async def insert_consent_record(self, **fields) -> uuid.UUID: ...
     async def append_audit_event(self, consent_id: uuid.UUID, event_type: str, payload: dict) -> None: ...
-    async def fetch_consent_record(self, consent_id: uuid.UUID) -> dict | None: ...
-    async def fetch_active_consent(self, principal_id: uuid.UUID, purpose_id: uuid.UUID) -> dict | None: ...
+    async def fetch_consent_record_for_update(self, consent_id: uuid.UUID) -> dict | None:
+        """Fetch a consent record by ID. In durable stores (e.g., PostgreSQL), this must
+        acquire an exclusive row-level lock (SELECT ... FOR UPDATE) inside the transaction
+        to prevent concurrent withdrawals from creating duplicate audit events."""
+        ...
+    async def fetch_active_consents_for_update(
+        self, principal_id: uuid.UUID, purpose_id: uuid.UUID
+    ) -> list[dict]:
+        """Fetch all active ('granted') consent records for a principal and purpose.
+        In durable stores (e.g. PostgreSQL), this must acquire exclusive row locks
+        (SELECT ... FOR UPDATE) to withdraw all active grants atomically."""
+        ...
     async def withdraw_consent_record(self, consent_id: uuid.UUID, withdrawn_at: datetime) -> None: ...
     async def record_processor_fanout(self, consent_id: uuid.UUID, processor_id: str) -> None: ...
 
@@ -92,21 +103,33 @@ class InMemoryConsentStore:
     async def fetch_notice_translation(self, notice_version_id, language_code):
         return self.translations.get((notice_version_id, language_code))
 
-    async def fetch_consent_record(self, consent_id: uuid.UUID) -> dict | None:
+    async def fetch_consent_record_for_update(self, consent_id: uuid.UUID) -> dict | None:
         rec = self.consent_records.get(consent_id)
         if rec:
             return {"consent_id": consent_id, **rec}
         return None
 
-    async def fetch_active_consent(self, principal_id: uuid.UUID, purpose_id: uuid.UUID) -> dict | None:
+    # Backward compatibility alias
+    async def fetch_consent_record(self, consent_id: uuid.UUID) -> dict | None:
+        return await self.fetch_consent_record_for_update(consent_id)
+
+    async def fetch_active_consents_for_update(
+        self, principal_id: uuid.UUID, purpose_id: uuid.UUID
+    ) -> list[dict]:
+        matches = []
         for cid, rec in self.consent_records.items():
             if (
                 rec.get("principal_id") == principal_id
                 and rec.get("purpose_id") == purpose_id
                 and rec.get("status") == "granted"
             ):
-                return {"consent_id": cid, **rec}
-        return None
+                matches.append({"consent_id": cid, **rec})
+        return matches
+
+    # Backward compatibility alias
+    async def fetch_active_consent(self, principal_id: uuid.UUID, purpose_id: uuid.UUID) -> dict | None:
+        consents = await self.fetch_active_consents_for_update(principal_id, purpose_id)
+        return consents[0] if consents else None
 
     async def withdraw_consent_record(self, consent_id: uuid.UUID, withdrawn_at: datetime) -> None:
         if consent_id in self.consent_records:
@@ -243,11 +266,11 @@ async def withdraw_consent(
     withdrawn_at = datetime.now(timezone.utc)
     processors = getattr(settings, "processors", [])
 
-    # The status check and withdrawal mutation are executed inside a single
-    # transaction (SELECT ... FOR UPDATE in PostgreSQL) to prevent concurrent
-    # requests from writing duplicate WITHDRAW audit events.
+    # The row lock (SELECT ... FOR UPDATE via fetch_consent_record_for_update)
+    # and withdrawal mutation are executed inside a single transaction to prevent
+    # concurrent requests from writing duplicate WITHDRAW audit events.
     async with db.transaction():
-        record = await db.fetch_consent_record(consent_id)
+        record = await db.fetch_consent_record_for_update(consent_id)
         if record is None:
             raise HTTPException(404, "consent_not_found")
         if record.get("status") == "withdrawn":
@@ -272,6 +295,7 @@ async def withdraw_consent(
         status="withdrawn",
         withdrawn_at=withdrawn_at,
         processors_notified=processors,
+        withdrawn_consent_ids=[consent_id],
     )
 
 
@@ -282,12 +306,44 @@ async def withdraw_consent_parity(
     settings: Settings = Depends(get_settings),
 ) -> ConsentWithdrawResponse:
     """Withdrawal parity endpoint implementing DPDPA Section 6(4).
-    Withdraws active consent for a given principal and purpose with the same
-    simplicity as granting consent."""
-    record = await db.fetch_active_consent(body.principal_id, body.purpose_id)
-    if record is None:
-        raise HTTPException(404, "active_consent_not_found")
-    return await withdraw_consent(record["consent_id"], db=db, settings=settings)
+
+    Withdraws all active consent records for a given principal and purpose with the
+    same simplicity as granting consent, executing all withdrawals within one atomic
+    transaction with row locks.
+    """
+    withdrawn_at = datetime.now(timezone.utc)
+    processors = getattr(settings, "processors", [])
+
+    async with db.transaction():
+        records = await db.fetch_active_consents_for_update(body.principal_id, body.purpose_id)
+        if not records:
+            raise HTTPException(404, "active_consent_not_found")
+
+        withdrawn_ids = []
+        for record in records:
+            cid = record["consent_id"]
+            await db.withdraw_consent_record(cid, withdrawn_at)
+            await db.append_audit_event(
+                cid,
+                "WITHDRAW",
+                {"withdrawn_at": withdrawn_at.isoformat(), "reason": "principal_withdrawal_parity"},
+            )
+            for proc in processors:
+                await db.record_processor_fanout(cid, proc)
+                await db.append_audit_event(
+                    cid,
+                    "ERASURE_FANOUT",
+                    {"processor_id": proc, "triggered_by": "WITHDRAW"},
+                )
+            withdrawn_ids.append(cid)
+
+    return ConsentWithdrawResponse(
+        consent_id=withdrawn_ids[-1],
+        status="withdrawn",
+        withdrawn_at=withdrawn_at,
+        processors_notified=processors,
+        withdrawn_consent_ids=withdrawn_ids,
+    )
 
 
 def create_app(store: ConsentStore, settings: Settings) -> FastAPI:
