@@ -24,9 +24,10 @@ From [DPDPA encryption requirements](https://statechecksecurity.com/blog/dpdpa-e
 - **Encryption context & pseudonyms.** Pass `pseudonym_key` (bytes) to `DPDPAFieldEncryptor` to
   HMAC the Data Principal ID into a pseudonym before sending it in the KMS encryption context,
   preventing cleartext personal data from appearing in CloudTrail audit logs.
-  If upgrading an existing system, `decrypt_field` transparently falls back to the un-pseudonymized
-  principal context if decryption with the pseudonym fails, enabling zero-downtime migration of
-  legacy ciphertext.
+  When upgrading a system with existing ciphertext, enable `legacy_context_fallback=True` to
+  allow decrypting legacy records with the raw context on context mismatch (note: while enabled,
+  legacy retries re-expose the raw ID in KMS audit logs). Run `rewrap_field(...)` on legacy records
+  to re-encrypt them under the pseudonymized context, then disable `legacy_context_fallback`.
 - **AWS audit logs.** The `kms_audit` log group needs a CloudTrail trail sending to it;
   CloudTrail's default event history keeps only 90 days.
 - **TLS 1.3 everywhere.** Istio's minimum is TLS 1.2 until you set

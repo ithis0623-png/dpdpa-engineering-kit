@@ -14,7 +14,13 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
+class KMSContextMismatchError(Exception):
+    """Raised when KMS decryption fails due to an encryption context mismatch."""
+    pass
 
 
 @dataclass
@@ -39,11 +45,24 @@ class DPDPAFieldEncryptor:
     5. Log the encryption event for Rule 6(1)(c) audit
     """
 
-    def __init__(self, kms_client, audit_logger, kek_id: str, pseudonym_key: bytes | None = None):
+    def __init__(
+        self,
+        kms_client,
+        audit_logger,
+        kek_id: str,
+        pseudonym_key: bytes | None = None,
+        legacy_context_fallback: bool = False,
+        context_mismatch_exception: type[BaseException] | tuple[type[BaseException], ...] = (
+            KMSContextMismatchError,
+            InvalidTag,
+        ),
+    ):
         self.kms = kms_client
         self.audit = audit_logger
         self.kek_id = kek_id
         self.pseudonym_key = pseudonym_key
+        self.legacy_context_fallback = legacy_context_fallback
+        self.context_mismatch_exception = context_mismatch_exception
 
     def _context_principal(self, data_principal_id: str) -> str:
         """Pseudonymise the Data Principal ID for KMS encryption context to prevent
@@ -150,10 +169,10 @@ class DPDPAFieldEncryptor:
                     "purpose": "dpdpa_field_encryption",
                 },
             )
-        except Exception:
-            # Migration fallback: if pseudonym_key is set and the first attempt failed,
-            # retry with the legacy raw principal context.
-            if self.pseudonym_key and context_principal != data_principal_id:
+        except self.context_mismatch_exception:
+            # Migration fallback: ONLY on context mismatch, and ONLY if legacy_context_fallback is explicitly True.
+            # Warning: Falling back re-exposes the raw data_principal_id to cloud KMS audit logs (CloudTrail).
+            if self.legacy_context_fallback and self.pseudonym_key and context_principal != data_principal_id:
                 dek = self.kms.decrypt(
                     key_id=encrypted.kek_id,
                     ciphertext=encrypted.wrapped_dek,
@@ -188,3 +207,27 @@ class DPDPAFieldEncryptor:
         del dek
 
         return plaintext.decode("utf-8")
+
+    def rewrap_field(
+        self,
+        encrypted: EncryptedField,
+        field_name: str,
+        data_principal_id: str,
+        requester: str = "rewrap-migration",
+    ) -> EncryptedField:
+        """Decrypts a field and re-encrypts it under the current pseudonymized context.
+
+        Allows rotating legacy records encrypted with raw principal IDs to use the
+        pseudonymized context so `legacy_context_fallback` can safely be turned off.
+        """
+        plaintext = self.decrypt_field(
+            encrypted=encrypted,
+            field_name=field_name,
+            data_principal_id=data_principal_id,
+            requester=requester,
+        )
+        return self.encrypt_field(
+            plaintext=plaintext,
+            field_name=field_name,
+            data_principal_id=data_principal_id,
+        )
