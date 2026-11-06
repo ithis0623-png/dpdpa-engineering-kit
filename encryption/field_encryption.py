@@ -8,11 +8,19 @@ Key Encryption Key (KEK).
 
 Maps to: Rule 6(1)(a) — encryption of personal data
 """
+import hashlib
+import hmac
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
+class KMSContextMismatchError(Exception):
+    """Raised when KMS decryption fails due to an encryption context mismatch."""
+    pass
 
 
 @dataclass
@@ -37,10 +45,31 @@ class DPDPAFieldEncryptor:
     5. Log the encryption event for Rule 6(1)(c) audit
     """
 
-    def __init__(self, kms_client, audit_logger, kek_id: str):
+    def __init__(
+        self,
+        kms_client,
+        audit_logger,
+        kek_id: str,
+        pseudonym_key: bytes | None = None,
+        legacy_context_fallback: bool = False,
+        context_mismatch_exception: type[BaseException] | tuple[type[BaseException], ...] = (
+            KMSContextMismatchError,
+            InvalidTag,
+        ),
+    ):
         self.kms = kms_client
         self.audit = audit_logger
         self.kek_id = kek_id
+        self.pseudonym_key = pseudonym_key
+        self.legacy_context_fallback = legacy_context_fallback
+        self.context_mismatch_exception = context_mismatch_exception
+
+    def _context_principal(self, data_principal_id: str) -> str:
+        """Pseudonymise the Data Principal ID for KMS encryption context to prevent
+        plaintext PII from being logged in CloudTrail / cloud audit trails."""
+        if self.pseudonym_key:
+            return hmac.new(self.pseudonym_key, data_principal_id.encode("utf-8"), hashlib.sha256).hexdigest()
+        return data_principal_id
 
     def encrypt_field(
         self,
@@ -73,12 +102,13 @@ class DPDPAFieldEncryptor:
         )
 
         # Step 3: Wrap the DEK with KMS KEK
+        context_principal = self._context_principal(data_principal_id)
         wrapped_dek = self.kms.encrypt(
             key_id=self.kek_id,
             plaintext=dek,
             encryption_context={
                 "field": field_name,
-                "principal": data_principal_id,
+                "principal": context_principal,
                 "purpose": "dpdpa_field_encryption",
             },
         )
@@ -116,17 +146,44 @@ class DPDPAFieldEncryptor:
         """Decrypt a personal data field.
 
         Every decryption event is logged per Rule 6(1)(c).
+
+        Migration note:
+            When `pseudonym_key` is configured, newly encrypted fields use an HMAC-SHA256
+            pseudonym of `data_principal_id` in the KMS encryption context.
+            Because KMS enforces exact encryption context matching, records wrapped
+            prior to configuring `pseudonym_key` (which used raw `data_principal_id`)
+            will fail decryption under the pseudonymized context.
+            To support seamless zero-downtime migration, if decryption with the
+            pseudonym fails, this method automatically falls back to attempting
+            decryption with the legacy un-pseudonymized `data_principal_id`.
         """
         # Step 1: Unwrap DEK via KMS
-        dek = self.kms.decrypt(
-            key_id=encrypted.kek_id,
-            ciphertext=encrypted.wrapped_dek,
-            encryption_context={
-                "field": field_name,
-                "principal": data_principal_id,
-                "purpose": "dpdpa_field_encryption",
-            },
-        )
+        context_principal = self._context_principal(data_principal_id)
+        try:
+            dek = self.kms.decrypt(
+                key_id=encrypted.kek_id,
+                ciphertext=encrypted.wrapped_dek,
+                encryption_context={
+                    "field": field_name,
+                    "principal": context_principal,
+                    "purpose": "dpdpa_field_encryption",
+                },
+            )
+        except self.context_mismatch_exception:
+            # Migration fallback: ONLY on context mismatch, and ONLY if legacy_context_fallback is explicitly True.
+            # Warning: Falling back re-exposes the raw data_principal_id to cloud KMS audit logs (CloudTrail).
+            if self.legacy_context_fallback and self.pseudonym_key and context_principal != data_principal_id:
+                dek = self.kms.decrypt(
+                    key_id=encrypted.kek_id,
+                    ciphertext=encrypted.wrapped_dek,
+                    encryption_context={
+                        "field": field_name,
+                        "principal": data_principal_id,
+                        "purpose": "dpdpa_field_encryption",
+                    },
+                )
+            else:
+                raise
 
         # Step 2: Decrypt field with AES-256-GCM
         aesgcm = AESGCM(dek)
@@ -150,3 +207,27 @@ class DPDPAFieldEncryptor:
         del dek
 
         return plaintext.decode("utf-8")
+
+    def rewrap_field(
+        self,
+        encrypted: EncryptedField,
+        field_name: str,
+        data_principal_id: str,
+        requester: str = "rewrap-migration",
+    ) -> EncryptedField:
+        """Decrypts a field and re-encrypts it under the current pseudonymized context.
+
+        Allows rotating legacy records encrypted with raw principal IDs to use the
+        pseudonymized context so `legacy_context_fallback` can safely be turned off.
+        """
+        plaintext = self.decrypt_field(
+            encrypted=encrypted,
+            field_name=field_name,
+            data_principal_id=data_principal_id,
+            requester=requester,
+        )
+        return self.encrypt_field(
+            plaintext=plaintext,
+            field_name=field_name,
+            data_principal_id=data_principal_id,
+        )
